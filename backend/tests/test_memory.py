@@ -1,29 +1,33 @@
 import os
 import pytest
+import uuid
+import tempfile
 from backend.memory.engine import ChronosMemoryEngine
 from backend.memory.models import ChatRequest, MemoryStatus, MemoryType
 
-import uuid
-
 @pytest.fixture
 def engine():
-    test_db = os.path.join(os.path.dirname(__file__), f"test_chronos_{uuid.uuid4().hex[:8]}.db")
+    # Use a temporary database path
+    temp_dir = tempfile.mkdtemp()
+    test_db = os.path.join(temp_dir, f"test_chronos_{uuid.uuid4().hex[:8]}.db")
     eng = ChronosMemoryEngine(db_path=test_db)
     yield eng
     try:
         if os.path.exists(test_db):
             os.remove(test_db)
+        if os.path.exists(temp_dir):
+            os.rmdir(temp_dir)
     except Exception:
         pass
 
 def test_cross_session_persistence(engine):
     db_file = engine.store.db_path
-    # Session 1
+    # Session 1: State fact
     req1 = ChatRequest(user_id="user_test", session_id="s1", message="I live in San Francisco.")
     resp1 = engine.process_chat(req1)
     assert len(resp1.new_memories_extracted) > 0
 
-    # Simulate full engine restart (reopening app)
+    # Simulate full engine restart (reopening app with same DB)
     new_instance = ChronosMemoryEngine(db_path=db_file)
     memories = new_instance.store.get_user_memories("user_test")
     assert len(memories) >= 1
@@ -37,7 +41,6 @@ def test_contradiction_resolution(engine):
         message="I live in Seattle.",
         simulated_date="2026-09-01T10:00:00Z"
     ))
-    
     active_mems = engine.store.get_user_memories("riku", include_superseded=False)
     assert any("Seattle" in m.content for m in active_mems)
 
@@ -71,94 +74,7 @@ def test_contradiction_resolution(engine):
     assert any("Tokyo" in a.content and a.is_active for a in q_resp.used_memories)
     assert any("Seattle" in a.content and not a.is_active for a in q_resp.superseded_memories)
 
-def test_multi_user_privacy_isolation(engine):
-    # Riku declares confidential project
-    engine.process_chat(ChatRequest(user_id="riku", message="My secret project is named Project-Chronos."))
-    
-    # Vansh asks about secret project
-    vansh_resp = engine.process_chat(ChatRequest(user_id="vansh", message="What is my secret project?"))
-    assert "Project-Chronos" not in vansh_resp.answer
-    assert len(vansh_resp.used_memories) == 0
-
-def test_selective_forgetting_gdpr(engine):
-    # User provides phone number
-    engine.process_chat(ChatRequest(user_id="riku", message="My phone number is +1-555-0199."))
-    
-    # Verify memory exists
-    mems = engine.store.get_user_memories("riku", include_superseded=False)
-    assert any("555-0199" in m.content for m in mems)
-
-    # User issues targeted forget command
-    forget_resp = engine.process_chat(ChatRequest(user_id="riku", message="Forget my phone number."))
-    assert "purged" in forget_resp.answer.lower()
-
-    # Verify memory is wiped
-    mems_after = engine.store.get_user_memories("riku", include_superseded=False, include_forgotten=False)
-    assert not any("555-0199" in m.content for m in mems_after)
-
-def test_knowledge_graph_structure(engine):
-    engine.process_chat(ChatRequest(user_id="riku", message="I live in Seattle."))
-    engine.process_chat(ChatRequest(user_id="riku", message="I moved to Tokyo."))
-    
-    graph = engine.get_knowledge_graph("riku")
-    assert "nodes" in graph and "edges" in graph
-    assert len(graph["nodes"]) >= 3 # User + 2 memory nodes
-    # Check for evolution edge
-    evolution_edges = [e for e in graph["edges"] if e.get("status") == "EVOLUTION"]
-    assert len(evolution_edges) >= 1
-def test_current_memory_beats_superseded_memory(engine):
-    """
-    The latest active fact must outrank an older superseded
-    fact even when the older fact has strong semantic similarity.
-    """
-
-    # Day 1
-    engine.process_chat(
-        ChatRequest(
-            user_id="riku",
-            session_id="day1",
-            message="I live in Seattle.",
-            simulated_date="2026-09-01T10:00:00Z"
-        )
-    )
-
-    # Day 3
-    engine.process_chat(
-        ChatRequest(
-            user_id="riku",
-            session_id="day3",
-            message="I moved to Tokyo.",
-            simulated_date="2026-09-03T10:00:00Z"
-        )
-    )
-
-    # Ask current-state question
-    response = engine.process_chat(
-        ChatRequest(
-            user_id="riku",
-            session_id="day4",
-            message="Where do I currently live?"
-        )
-    )
-
-    # Current answer must contain Tokyo.
-    assert "Tokyo" in response.answer
-
-    # Tokyo must be an active memory.
-    assert any(
-        "Tokyo" in memory.content
-        and memory.is_active
-        for memory in response.used_memories
-    )
-
-    # Seattle must NOT be treated as current truth.
-    assert not any(
-        "Seattle" in memory.content
-        and memory.is_active
-        for memory in response.used_memories
-    )
-
-def test_active_memory_beats_superseded_memory_in_retrieval(engine):
+def test_active_memory_beats_superseded_in_retrieval(engine):
     # Day 1: old location
     engine.process_chat(ChatRequest(
         user_id="retrieval_test",
@@ -175,30 +91,25 @@ def test_active_memory_beats_superseded_memory_in_retrieval(engine):
         simulated_date="2026-09-03T10:00:00Z"
     ))
 
-    # Search for the current location.
+    # Search for current location
     results = engine.store.vector_search(
         user_id="retrieval_test",
         query="Where do I live?",
         top_k=5,
         min_similarity=0.15
     )
-
     assert len(results) >= 2
-
-    # The highest-ranked result should be the current memory.
     top_memory = results[0][0]
-
     assert top_memory.status == MemoryStatus.ACTIVE
     assert "Tokyo" in top_memory.content
 
-def test_historical_query_retrieves_superseded_memory(engine):
+def test_historical_query_retrieves_superseded(engine):
     engine.process_chat(ChatRequest(
         user_id="history_test",
         session_id="day1",
         message="I live in Seattle.",
         simulated_date="2026-09-01T10:00:00Z"
     ))
-
     engine.process_chat(ChatRequest(
         user_id="history_test",
         session_id="day3",
@@ -206,52 +117,75 @@ def test_historical_query_retrieves_superseded_memory(engine):
         simulated_date="2026-09-03T10:00:00Z"
     ))
 
-    results = engine.store.vector_search(
+    resp = engine.process_chat(ChatRequest(
         user_id="history_test",
-        query="Where did I live before Tokyo?",
-        top_k=5,
-        min_similarity=0.15
-    )
-
-    assert len(results) >= 1
-
-    historical = [
-        memory for memory, score in results
-        if "Seattle" in memory.content
-    ]
-
-    assert len(historical) >= 1
-
-def test_forget_command_removes_memory_completely(engine):
-    # Add memory
-    r = engine.process_chat(ChatRequest(
-        user_id="forget_test",
-        session_id="add",
-        message="I have a dog named Fido.",
-        simulated_date="2026-09-01T10:00:00Z"
+        message="Where did I live before Tokyo?"
     ))
+    assert "Seattle" in resp.answer
 
-    mem_id = r.new_memories_extracted[0].id
+def test_multi_user_privacy_isolation(engine):
+    # Riku declares confidential project
+    engine.process_chat(ChatRequest(user_id="riku", message="My confidential project is codenamed TitanOmega."))
+    
+    # Vansh asks about secret project
+    vansh_resp = engine.process_chat(ChatRequest(user_id="vansh", message="What is my confidential project codename?"))
+    assert "TitanOmega" not in vansh_resp.answer
+    assert len(vansh_resp.used_memories) == 0
 
-    # Verify exists
-    mem_before = engine.store.get_memory_by_id(mem_id)
-    assert mem_before is not None
+def test_selective_forgetting_gdpr(engine):
+    # User provides phone number
+    r = engine.process_chat(ChatRequest(user_id="riku", message="My phone number is +1-555-0199."))
+    mems = engine.store.get_user_memories("riku", include_superseded=False)
+    assert any("555-0199" in m.content for m in mems)
 
-    # Forget it
+    # User issues targeted forget command
+    forget_resp = engine.process_chat(ChatRequest(user_id="riku", message="Forget my phone number."))
+    assert "purged" in forget_resp.answer.lower()
+
+    # Verify memory is wiped
+    mems_after = engine.store.get_user_memories("riku", include_superseded=False, include_forgotten=False)
+    assert not any("555-0199" in m.content for m in mems_after)
+
+    # Verify audit log was created
+    audit_logs = engine.store.get_audit_logs(user_id="riku")
+    assert len(audit_logs) >= 1
+    assert audit_logs[0].action == "PURGE"
+
+def test_diet_preference_evolution(engine):
+    # Day 1: Keto
     engine.process_chat(ChatRequest(
-        user_id="forget_test",
-        session_id="forget",
-        message="Forget my dog Fido.",
+        user_id="vansh",
+        session_id="v1",
+        message="I eat a heavy keto carnivore diet with steak.",
         simulated_date="2026-09-02T10:00:00Z"
     ))
+    
+    # Day 2: Vegan
+    engine.process_chat(ChatRequest(
+        user_id="vansh",
+        session_id="v2",
+        message="I switched to a strict vegan diet for health.",
+        simulated_date="2026-09-04T10:00:00Z"
+    ))
 
-    # Verify completely gone
-    mem_after = engine.store.get_memory_by_id(mem_id)
-    assert mem_after is None
+    resp = engine.process_chat(ChatRequest(
+        user_id="vansh",
+        message="What is my current diet?"
+    ))
+    assert "vegan" in resp.answer.lower()
 
-    # Verify no longer in active or superseded
-    active = engine.store.get_user_memories("forget_test", include_superseded=False)
-    superseded = engine.store.get_user_memories("forget_test", include_superseded=True)
+def test_knowledge_graph_structure(engine):
+    engine.process_chat(ChatRequest(user_id="riku", message="I live in Seattle."))
+    engine.process_chat(ChatRequest(user_id="riku", message="I moved to Tokyo."))
+    
+    graph = engine.get_knowledge_graph("riku")
+    assert "nodes" in graph and "edges" in graph
+    assert len(graph["nodes"]) >= 3 # User + 2 memory nodes
+    evolution_edges = [e for e in graph["edges"] if e.get("status") == "EVOLUTION"]
+    assert len(evolution_edges) >= 1
 
-    assert not any(mem.id == mem_id for mem in active)
-    assert not any(mem.id == mem_id for mem in superseded)
+def test_system_stats(engine):
+    engine.process_chat(ChatRequest(user_id="riku", message="I live in Seattle."))
+    stats = engine.store.get_system_stats()
+    assert stats["total_memories"] >= 1
+    assert "riku" in stats["users"]

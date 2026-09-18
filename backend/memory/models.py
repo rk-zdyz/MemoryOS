@@ -5,9 +5,9 @@ import uuid
 from datetime import datetime, timezone
 
 class MemoryType(str, Enum):
-    PROFILE_FACT = "PROFILE_FACT"       # User info, location, identity, roles
-    PREFERENCE = "PREFERENCE"           # Likes, dislikes, tools, habits
-    DECISION = "DECISION"               # Strategic choices, architecture decisions
+    PROFILE_FACT = "PROFILE_FACT"       # User info, location, identity, roles, company
+    PREFERENCE = "PREFERENCE"           # Likes, dislikes, tools, beverages, habits
+    DECISION = "DECISION"               # Strategic choices, architecture decisions, tech stack
     EVENT_EPISODE = "EVENT_EPISODE"     # Time-bound meetings, trips, milestones
     TRANSIENT = "TRANSIENT"             # Chit-chat, casual remarks, low-value greetings
 
@@ -20,13 +20,13 @@ class MemoryStatus(str, Enum):
 
 class EntityTriple(BaseModel):
     subject: str = "User"
-    predicate: str                      # e.g., "lives_in", "prefers", "decided_to_use", "allergic_to"
-    object: str                         # e.g., "Tokyo", "Tea", "PostgreSQL", "Peanuts"
+    predicate: str                      # e.g., "lives_in", "primary_beverage", "database_choice"
+    object: str                         # e.g., "Tokyo", "Matcha", "SQLite-Vec"
     qualifier: Optional[str] = None     # e.g., "since 2026", "strictly"
 
 class MemoryEntry(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str = "alice"
+    user_id: str = "riku"
     session_id: str = "default_session"
     content: str
     memory_type: MemoryType = MemoryType.PROFILE_FACT
@@ -68,12 +68,12 @@ class MemorySearchResult(BaseModel):
     conflict_summary: Optional[str] = None
 
 class ChatRequest(BaseModel):
-    user_id: str = "alice"
+    user_id: str = "riku"
     session_id: str = "session_1"
     message: str
-    simulated_date: Optional[str] = None  # For time-travel tests (e.g., "Day 1", "Day 3")
+    simulated_date: Optional[str] = None  # For time-travel tests (e.g., "2026-09-01T10:00:00Z")
     api_key: Optional[str] = None
-    provider: Optional[str] = "local"     # local, gemini, openai, groq
+    provider: Optional[str] = "local"     # local, gemini, openai
 
 class ChatResponse(BaseModel):
     answer: str
@@ -84,3 +84,35 @@ class ChatResponse(BaseModel):
     conflict_resolution_notes: List[str] = Field(default_factory=list)
     new_memories_extracted: List[MemoryEntry] = Field(default_factory=list)
     simulated_date: Optional[str] = None
+    latency_ms: Optional[float] = None
+
+class AuditLogEntry(BaseModel):
+    id: str
+    user_id: str
+    action: str
+    target_memory_id: Optional[str] = None
+    reason: Optional[str] = None
+    created_at: str
+
+class ManualMemoryRequest(BaseModel):
+    user_id: str = "riku"
+    session_id: str = "manual_entry"
+    content: str
+    memory_type: MemoryType = MemoryType.PROFILE_FACT
+    predicate: Optional[str] = None
+    object: Optional[str] = None
+    importance: float = 0.8
+    simulated_date: Optional[str] = None
+
+class ForgetRequest(BaseModel):
+    user_id: str
+    target: Optional[str] = None
+    query: Optional[str] = None
+    reason: Optional[str] = "User requested deletion"
+
+    def get_target(self) -> str:
+        return self.target or self.query or "all"
+
+class ResetRequest(BaseModel):
+    user_id: Optional[str] = None # None means reset all
+

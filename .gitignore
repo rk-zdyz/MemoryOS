@@ -4,6 +4,10 @@ __pycache__/
 .venv/
 venv/
 env/
+.pytest_cache/
+*.db
+*.sqlite
+*.sqlite3
 
 # Environment / secrets
 .env
@@ -12,8 +16,6 @@ env/
 
 # Node / React
 node_modules/
-dist/
-build/
 .vite/
 
 # IDE

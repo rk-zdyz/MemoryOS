@@ -1,13 +1,24 @@
 import os
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.memory.engine import ChronosMemoryEngine
-from backend.memory.models import ChatRequest, ChatResponse, MemoryEntry, MemoryStatus
+from backend.memory.models import (
+    ChatRequest,
+    ChatResponse,
+    MemoryEntry,
+    MemoryStatus,
+    MemoryType,
+    EntityTriple,
+    ForgetRequest,
+    ResetRequest,
+    ManualMemoryRequest,
+    AuditLogEntry
+)
 from backend.seed_data import seed_database
 
 app = FastAPI(
@@ -27,7 +38,7 @@ app.add_middleware(
 
 engine = ChronosMemoryEngine()
 
-# Initialize with sample data if fresh database
+# Seed database on startup if fresh
 try:
     existing_riku = engine.store.get_user_memories("riku")
     if not existing_riku:
@@ -35,13 +46,9 @@ try:
 except Exception as e:
     print("Startup seed note:", e)
 
-class ForgetRequest(BaseModel):
-    user_id: str
-    target: str # either a memory_id or a keyword/target phrase
-    reason: Optional[str] = "User requested deletion"
-
-class ResetRequest(BaseModel):
-    user_id: Optional[str] = None # None means reset all
+# ------------------------------------------------------------
+# CHAT ENDPOINT
+# ------------------------------------------------------------
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat_endpoint(req: ChatRequest):
@@ -51,25 +58,37 @@ def chat_endpoint(req: ChatRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ------------------------------------------------------------
+# MEMORIES ENDPOINTS
+# ------------------------------------------------------------
+
 @app.get("/api/memories")
 def get_memories(
     user_id: str = "riku",
     include_superseded: bool = True,
     include_forgotten: bool = False,
-    query: Optional[str] = None
+    query: Optional[str] = None,
+    simulated_date: Optional[str] = None
 ):
     try:
         if query and query.strip():
-            res = engine.retrieve_with_attribution(user_id=user_id, query=query, top_k=10)
+            res = engine.retrieve_with_attribution(
+                user_id=user_id,
+                query=query,
+                top_k=15,
+                simulated_date=simulated_date
+            )
             return {
                 "user_id": user_id,
                 "memories": [m.dict() for m in res.all_retrieved],
-                "attributions": [a.dict() for a in res.attributions]
+                "attributions": [a.dict() for a in res.attributions],
+                "total_count": len(res.all_retrieved)
             }
         memories = engine.store.get_user_memories(
             user_id=user_id,
             include_superseded=include_superseded,
-            include_forgotten=include_forgotten
+            include_forgotten=include_forgotten,
+            simulated_date=simulated_date
         )
         return {
             "user_id": user_id,
@@ -79,10 +98,59 @@ def get_memories(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/knowledge-graph")
-def get_knowledge_graph(user_id: str = "riku"):
+@app.post("/api/memories/manual")
+def create_manual_memory(req: ManualMemoryRequest):
     try:
-        graph = engine.get_knowledge_graph(user_id)
+        triple = None
+        if req.predicate and req.object:
+            triple = EntityTriple(
+                subject="User",
+                predicate=req.predicate,
+                object=req.object
+            )
+        
+        mem = MemoryEntry(
+            user_id=req.user_id,
+            session_id=req.session_id,
+            content=req.content,
+            memory_type=req.memory_type,
+            status=MemoryStatus.ACTIVE,
+            triple=triple,
+            importance=req.importance,
+            valid_from=req.simulated_date or None
+        )
+        saved = engine.store.save_memory(mem)
+        resolutions = engine.resolver.resolve_conflicts_for_new_memory(saved, simulated_date=req.simulated_date)
+        return {
+            "success": True,
+            "memory": saved.dict(),
+            "conflict_resolutions": resolutions
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/memories/{memory_id}")
+def delete_memory_endpoint(
+    memory_id: str = Path(...),
+    user_id: str = Query("riku")
+):
+    try:
+        success = engine.store.forget_memory(memory_id=memory_id, user_id=user_id, reason="User deleted via Memory Inspector")
+        return {"success": success, "memory_id": memory_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ------------------------------------------------------------
+# KNOWLEDGE GRAPH & TIMELINE
+# ------------------------------------------------------------
+
+@app.get("/api/knowledge-graph")
+def get_knowledge_graph(
+    user_id: str = "riku",
+    simulated_date: Optional[str] = None
+):
+    try:
+        graph = engine.get_knowledge_graph(user_id=user_id, simulated_date=simulated_date)
         return graph
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -103,24 +171,37 @@ def get_history(user_id: str = "riku", session_id: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ------------------------------------------------------------
+# FORGET / RESET / AUDIT
+# ------------------------------------------------------------
+
 @app.post("/api/forget")
 def forget_endpoint(req: ForgetRequest):
     try:
-        # Check if target is a UUID memory_id
-        mem = engine.store.get_memory(req.target)
+        target = req.get_target()
+        # Check if target is a direct memory_id
+        mem = engine.store.get_memory(target)
         if mem and mem.user_id == req.user_id:
-            success = engine.store.forget_memory(mem.id, user_id=req.user_id, reason=req.reason)
-            return {"success": success, "message": f"Memory ID #{req.target[:8]} successfully purged."}
+            success = engine.store.forget_memory(mem.id, user_id=req.user_id, reason=req.reason or "User requested deletion")
+            return {"success": success, "message": f"Memory ID #{target[:8]} successfully purged.", "purged_count": 1, "forgotten_count": 1, "purged_ids": [mem.id]}
         
-        # Otherwise treat as target search query
-        candidates = engine.store.vector_search(req.user_id, req.target, top_k=5, min_similarity=0.2)
+        # Otherwise search by vector/keyword query
+        candidates = engine.store.vector_search(req.user_id, target, top_k=5, min_similarity=0.15)
         purged = []
         for c_mem, score in candidates:
             if c_mem.status != MemoryStatus.FORGOTTEN:
-                engine.store.forget_memory(c_mem.id, user_id=req.user_id, reason=req.reason)
+                engine.store.forget_memory(c_mem.id, user_id=req.user_id, reason=req.reason or f"Purged by query '{target}'")
                 purged.append(c_mem.id)
 
-        return {"success": True, "purged_count": len(purged), "purged_ids": purged}
+        if not purged:
+            # Full keyword sweep
+            all_mems = engine.store.get_user_memories(req.user_id, include_superseded=True)
+            for m in all_mems:
+                if any(w.lower() in m.content.lower() for w in target.split() if len(w) > 2):
+                    engine.store.forget_memory(m.id, user_id=req.user_id, reason=req.reason or f"Purged by keyword '{target}'")
+                    purged.append(m.id)
+
+        return {"success": True, "purged_count": len(purged), "forgotten_count": len(purged), "purged_ids": purged}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -151,7 +232,23 @@ def list_users():
         })
     return {"users": user_stats}
 
-# Serve frontend build if exists
+@app.get("/api/stats")
+def get_system_stats():
+    try:
+        stats = engine.store.get_system_stats()
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/audit-logs")
+def get_audit_logs(user_id: Optional[str] = None):
+    try:
+        logs = engine.store.get_audit_logs(user_id=user_id, limit=50)
+        return {"logs": [l.dict() for l in logs]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Serve frontend build if present
 frontend_dist = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
 if os.path.exists(frontend_dist):
     app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")

@@ -6,6 +6,7 @@ import KnowledgeGraph from './components/KnowledgeGraph';
 import TimelineSlider from './components/TimelineSlider';
 import JudgeBenchmarks from './components/JudgeBenchmarks';
 import SettingsModal from './components/SettingsModal';
+import AuditLogModal from './components/AuditLogModal';
 import {
   sendChatMessage,
   getMemories,
@@ -29,21 +30,22 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [highlightedMemoryId, setHighlightedMemoryId] = useState(null);
   
-  // Settings
+  // Modals
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAuditLogsOpen, setIsAuditLogsOpen] = useState(false);
   const [provider, setProvider] = useState('local');
   const [apiKey, setApiKey] = useState('');
 
-  // Load initial data for active user
+  // Load initial data for active user or simulated date changes
   useEffect(() => {
-    loadUserData(activeUser);
-  }, [activeUser]);
+    loadUserData(activeUser, simulatedDate);
+  }, [activeUser, simulatedDate]);
 
-  const loadUserData = async (userId) => {
+  const loadUserData = async (userId, simDate = null) => {
     try {
       const [memsRes, graphRes, timelineRes, histRes, usersRes] = await Promise.all([
-        getMemories(userId, true, true),
-        getKnowledgeGraph(userId),
+        getMemories(userId, true, true, '', simDate),
+        getKnowledgeGraph(userId, simDate),
         getTimeline(userId),
         getChatHistory(userId),
         getUsersList()
@@ -74,110 +76,105 @@ export default function App() {
   };
 
   const handleSendMessage = async (text) => {
-  if (isLoading || !text?.trim()) return;
+    if (isLoading || !text?.trim()) return;
 
-  setIsLoading(true);
+    setIsLoading(true);
+    const messageText = text.trim();
 
-  const messageText = text.trim();
-
-  // Immediately add the exact message the user clicked/typed.
-  const newMsg = {
-    role: 'user',
-    content: messageText,
-    simulated_date: simulatedDate,
-    created_at: new Date().toISOString(),
-    used_memories: [],
-    superseded_memories: [],
-    conflict_notes: []
-  };
-
-  setMessages(prev => [...prev, newMsg]);
-
-  try {
-    const res = await sendChatMessage(
-      activeUser,
-      `session_${activeUser}`,
-      messageText,
-      simulatedDate,
-      provider,
-      apiKey
-    );
-
-    const assistantMsg = {
-      role: 'assistant',
-      content: res.answer,
-      simulated_date: res.simulated_date,
+    // Immediately append user message
+    const newMsg = {
+      role: 'user',
+      content: messageText,
+      simulated_date: simulatedDate,
       created_at: new Date().toISOString(),
-      used_memories: res.used_memories || [],
-      superseded_memories: res.superseded_memories || [],
-      conflict_notes: res.conflict_resolution_notes || []
+      used_memories: [],
+      superseded_memories: [],
+      conflict_notes: []
     };
 
-    // Add ONLY the new assistant response.
-    // Do NOT reload conversation history here.
-    setMessages(prev => [...prev, assistantMsg]);
+    setMessages(prev => [...prev, newMsg]);
 
-    // Refresh memory/graph/timeline data WITHOUT touching messages.
     try {
-      const [memsRes, graphRes, timelineRes, usersRes] =
-        await Promise.all([
-          getMemories(activeUser, true, true),
-          getKnowledgeGraph(activeUser),
+      const res = await sendChatMessage(
+        activeUser,
+        `session_${activeUser}`,
+        messageText,
+        simulatedDate,
+        provider,
+        apiKey
+      );
+
+      const assistantMsg = {
+        role: 'assistant',
+        content: res.answer,
+        simulated_date: res.simulated_date,
+        created_at: new Date().toISOString(),
+        used_memories: res.used_memories || [],
+        superseded_memories: res.superseded_memories || [],
+        conflict_notes: res.conflict_resolution_notes || []
+      };
+
+      setMessages(prev => [...prev, assistantMsg]);
+
+      // Refresh memory / graph / timeline views
+      try {
+        const [memsRes, graphRes, timelineRes, usersRes] = await Promise.all([
+          getMemories(activeUser, true, true, '', simulatedDate),
+          getKnowledgeGraph(activeUser, simulatedDate),
           getTimeline(activeUser),
           getUsersList()
         ]);
 
-      setMemories(memsRes.memories || []);
-      setGraphData(graphRes || { nodes: [], edges: [] });
-      setTimelineEvents(timelineRes.events || []);
-      setUsersList(usersRes.users || []);
-    } catch (refreshErr) {
-      console.error(
-        "Failed to refresh memory data:",
-        refreshErr
-      );
-    }
-
-  } catch (err) {
-
-    setMessages(prev => [
-      ...prev,
-      {
-        role: 'assistant',
-        content: `Error communicating with memory engine: ${err.message}`,
-        created_at: new Date().toISOString(),
-        used_memories: [],
-        superseded_memories: [],
-        conflict_notes: []
+        setMemories(memsRes.memories || []);
+        setGraphData(graphRes || { nodes: [], edges: [] });
+        setTimelineEvents(timelineRes.events || []);
+        setUsersList(usersRes.users || []);
+      } catch (refreshErr) {
+        console.error("Failed to refresh memory bank:", refreshErr);
       }
-    ]);
-
-  } finally {
-
-    setIsLoading(false);
-  }
-};
+    } catch (err) {
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: `Error communicating with memory engine: ${err.message}`,
+          created_at: new Date().toISOString(),
+          used_memories: [],
+          superseded_memories: [],
+          conflict_notes: []
+        }
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleForgetMemory = async (memoryId) => {
     try {
       await forgetMemory(activeUser, memoryId);
-      await loadUserData(activeUser);
+      await loadUserData(activeUser, simulatedDate);
     } catch (err) {
-      console.error("Failed to forget memory:", err);
+      console.error("Failed to purge memory:", err);
     }
   };
 
   const handleResetDatabase = async () => {
     try {
       await resetDatabase();
-      await loadUserData(activeUser);
+      await loadUserData(activeUser, simulatedDate);
     } catch (err) {
       console.error("Failed to reset database:", err);
     }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-primary)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--void-black)', overflow: 'hidden', position: 'relative' }}>
+      {/* Global CRT Scanlines Overlay */}
+      <div className="crt-scanlines" />
+
+      {/* Atmospheric Circuit Grid Background */}
+      <div className="circuit-grid-bg" />
+
       {/* Top Navbar */}
       <Navbar
         activeUser={activeUser}
@@ -185,16 +182,17 @@ export default function App() {
         usersList={usersList}
         onReset={handleResetDatabase}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenAuditLogs={() => setIsAuditLogsOpen(true)}
         activeTab={activeTab}
         onSelectTab={setActiveTab}
-        simulatedDay={simulatedDate}
-        onSimulatedDayChange={setSimulatedDate}
+        simulatedDate={simulatedDate}
+        onSimulatedDateChange={setSimulatedDate}
       />
 
       {/* Main Workspace Area */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', padding: '12px 16px 16px 16px', gap: '14px' }}>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', padding: '12px 16px 16px 16px', gap: '14px', zIndex: 10 }}>
         {/* Left / Main Workspace Pane */}
-        <div className="glass-panel" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div className="cyber-card cyber-chamfer-sm" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           {activeTab === 'chat' && (
             <ChatView
               messages={messages}
@@ -210,7 +208,7 @@ export default function App() {
           {activeTab === 'graph' && (
             <KnowledgeGraph
               graphData={graphData}
-              onRefresh={() => loadUserData(activeUser)}
+              onRefresh={() => loadUserData(activeUser, simulatedDate)}
               onSelectMemory={(id) => setHighlightedMemoryId(id)}
             />
           )}
@@ -224,19 +222,19 @@ export default function App() {
 
           {activeTab === 'benchmarks' && (
             <JudgeBenchmarks
-              onBenchmarkComplete={() => loadUserData(activeUser)}
+              onBenchmarkComplete={() => loadUserData(activeUser, simulatedDate)}
               onSelectUser={setActiveUser}
             />
           )}
         </div>
 
         {/* Right Cognitive Memory Bank Inspector */}
-        <div style={{ width: '380px', height: '100%', overflow: 'hidden', borderRadius: 'var(--radius-md)' }}>
+        <div style={{ width: '380px', height: '100%', overflow: 'hidden' }}>
           <MemoryInspector
             memories={memories}
             activeUser={activeUser}
             onForgetMemory={handleForgetMemory}
-            onRefresh={() => loadUserData(activeUser)}
+            onRefresh={() => loadUserData(activeUser, simulatedDate)}
             highlightedMemoryId={highlightedMemoryId}
           />
         </div>
@@ -251,6 +249,13 @@ export default function App() {
         apiKey={apiKey}
         onApiKeyChange={setApiKey}
         onResetDatabase={handleResetDatabase}
+      />
+
+      {/* Audit Log Modal */}
+      <AuditLogModal
+        isOpen={isAuditLogsOpen}
+        onClose={() => setIsAuditLogsOpen(false)}
+        activeUser={activeUser}
       />
     </div>
   );

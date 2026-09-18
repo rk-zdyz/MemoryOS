@@ -1,5 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, CheckCircle, AlertTriangle, Trash2, Clock, Eye, ShieldCheck, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
+import {
+  Send,
+  Sparkles,
+  CheckCircle,
+  AlertTriangle,
+  Clock,
+  Eye,
+  ShieldCheck,
+  ChevronDown,
+  ChevronUp,
+  Calendar,
+  Terminal,
+  Zap,
+  Cpu,
+  CornerDownRight
+} from 'lucide-react';
 
 export default function ChatView({
   messages,
@@ -16,7 +31,7 @@ export default function ChatView({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, isLoading]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -33,74 +48,170 @@ export default function ChatView({
   };
 
   const quickPrompts = [
-    { label: "📍 Where do I live?", text: "Where do I live?" },
-    { label: "☕ My favorite drink?", text: "What is my favorite beverage?" },
-    { label: "🗄️ Database decision?", text: "What database did we choose for our project?" },
-    { label: "⚡ State update: Moved to Tokyo", text: "I moved to Tokyo last weekend and currently reside there." },
-    { label: "🍵 Preference pivot: Switched to Matcha", text: "I quit coffee completely; now I only drink matcha green tea." },
-    { label: "🗑️ GDPR Purge: Forget phone", text: "Forget my phone number." }
+    { label: "> 📍 WHERE DO I LIVE?", text: "Where do I live right now?" },
+    { label: "> 🕰️ WHERE DID I LIVE BEFORE?", text: "Where did I live before Tokyo?" },
+    { label: "> 🍵 FAVORITE DRINK?", text: "What is my favorite beverage?" },
+    { label: "> 🗄️ DATABASE CHOICE?", text: "What database did we choose for our project?" },
+    { label: "> ⚡ UPDATE: MOVED TO TOKYO", text: "I moved to Tokyo last weekend and currently reside there." },
+    { label: "> 🍵 PIVOT: SWITCHED TO MATCHA", text: "I quit coffee completely; now I only drink matcha green tea." },
+    { label: "> 🗑️ GDPR PURGE: PHONE", text: "Forget my phone number." }
   ];
+
+  const renderFormattedText = (text) => {
+    if (!text) return null;
+    const lines = text.split('\n');
+    return lines.map((line, lIdx) => {
+      const parts = line.split(/(\*\*.*?\*\*|`.*?`|\*.*?\*)/g);
+      return (
+        <div key={lIdx} style={{ minHeight: line ? 'auto' : '8px', marginBottom: '3px' }}>
+          {parts.map((part, pIdx) => {
+            if (part.startsWith('**') && part.endsWith('**')) {
+              return (
+                <strong
+                  key={pIdx}
+                  style={{
+                    color: 'var(--neon-green)',
+                    fontWeight: 700,
+                    textShadow: '0 0 6px var(--neon-green-glow)'
+                  }}
+                >
+                  {part.slice(2, -2)}
+                </strong>
+              );
+            } else if (part.startsWith('`') && part.endsWith('`')) {
+              return (
+                <span
+                  key={pIdx}
+                  style={{
+                    background: 'var(--cyber-black)',
+                    border: '1px solid var(--neon-green)',
+                    color: 'var(--neon-green)',
+                    padding: '1px 6px',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '0.85em'
+                  }}
+                >
+                  {part.slice(1, -1)}
+                </span>
+              );
+            } else if (part.startsWith('*') && part.endsWith('*')) {
+              return <em key={pIdx} style={{ color: 'var(--hot-magenta)' }}>{part.slice(1, -1)}</em>;
+            }
+            return part;
+          })}
+        </div>
+      );
+    });
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
-      {/* Date Simulation Bar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '8px 16px', background: 'rgba(16, 21, 34, 0.7)',
-        borderBottom: '1px solid var(--border-subtle)', fontSize: '0.78rem'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)' }}>
-          <Calendar size={14} color="#06b6d4" />
-          <span>Simulated Timestamp:</span>
+      {/* Date Simulation & Tenant Bar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 16px',
+          background: 'rgba(18, 18, 26, 0.95)',
+          borderBottom: '1px solid var(--cyber-border)',
+          fontSize: '0.75rem',
+          fontFamily: 'var(--font-mono)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-secondary)' }}>
+          <Calendar size={13} color="var(--neon-green)" />
+          <span className="tech-label" style={{ color: 'var(--neon-green)', fontWeight: 700 }}>
+            &gt; SIMULATED_TIMELINE:
+          </span>
           <select
             value={simulatedDate || ''}
             onChange={(e) => onSimulatedDateChange(e.target.value || null)}
-            style={{
-              background: 'var(--bg-input)', color: '#f8fafc',
-              border: '1px solid var(--border-subtle)', borderRadius: '4px',
-              padding: '2px 8px', fontSize: '0.75rem'
-            }}
+            className="cyber-select"
+            style={{ fontSize: '0.72rem', padding: '2px 8px' }}
           >
-            <option value="">Live Real-Time (Current)</option>
-            <option value="2026-09-01T10:00:00Z">Day 1 (2026-09-01) - Initial Setup</option>
-            <option value="2026-09-02T10:00:00Z">Day 2 (2026-09-02) - Intermediate Changes</option>
-            <option value="2026-09-03T10:00:00Z">Day 3 (2026-09-03) - Major Relocation & Reversals</option>
-            <option value="2026-09-05T10:00:00Z">Day 5 (2026-09-05) - Future Consolidation</option>
+            <option value="">[LIVE / PRESENT REAL-TIME]</option>
+            <option value="2026-09-01T10:00:00Z">DAY 01 (2026-09-01) - INITIAL SETUP</option>
+            <option value="2026-09-02T10:00:00Z">DAY 02 (2026-09-02) - INTERMEDIATE MUTATIONS</option>
+            <option value="2026-09-03T10:00:00Z">DAY 03 (2026-09-03) - RELOCATIONS & REVERSALS</option>
+            <option value="2026-09-05T10:00:00Z">DAY 05 (2026-09-05) - CONSOLIDATION</option>
           </select>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#34d399', fontSize: '0.72rem' }}>
-          <ShieldCheck size={14} />
-          <span>Tenant Isolated: <strong>{activeUser.toUpperCase()}</strong></span>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className="badge-cyber badge-cyber-green">
+            <ShieldCheck size={11} />
+            NODE: {activeUser.toUpperCase()} [ISOLATED]
+          </span>
         </div>
       </div>
 
       {/* Messages Scroll Area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '18px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '16px'
+        }}
+      >
         {messages.length === 0 && (
-          <div style={{
-            margin: 'auto', textAlign: 'center', maxWidth: '460px',
-            padding: '30px', borderRadius: '16px', background: 'rgba(22, 29, 46, 0.4)',
-            border: '1px dashed var(--border-subtle)'
-          }}>
-            <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(99, 102, 241, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
-              <Sparkles size={26} color="#06b6d4" />
+          <div
+            className="cyber-chamfer"
+            style={{
+              margin: 'auto',
+              textAlign: 'center',
+              maxWidth: '520px',
+              padding: '36px 24px',
+              background: 'rgba(18, 18, 26, 0.9)',
+              border: '1px solid var(--neon-green)',
+              boxShadow: '0 0 25px var(--neon-green-glow)',
+              position: 'relative'
+            }}
+          >
+            <div
+              className="cyber-chamfer-sm"
+              style={{
+                width: '46px',
+                height: '46px',
+                border: '1px solid var(--neon-green)',
+                background: 'rgba(0, 255, 136, 0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 16px',
+                boxShadow: '0 0 15px var(--neon-green-glow)'
+              }}
+            >
+              <Sparkles size={22} color="var(--neon-green)" />
             </div>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '8px' }}>
-              Continuous Cognitive Memory Active
-            </h3>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.6 }}>
-              ChronosMemory tracks your identity, evolving decisions, and habits across sessions. Ask what it knows, update a fact, or explore how it resolves contradictions!
+            <h2
+              className="font-heading"
+              style={{
+                fontSize: '1.2rem',
+                fontWeight: 800,
+                marginBottom: '10px',
+                letterSpacing: '0.1em',
+                color: 'var(--text-primary)'
+              }}
+            >
+              COGNITIVE BELIEF ARCHITECTURE
+            </h2>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '20px', lineHeight: 1.6, fontFamily: 'var(--font-mono)' }}>
+              MemoryOS tracks real-time temporal truth, belief mutations, and contradictory state updates across sessions. Enter assertions, query past history, or trigger GDPR purges!
             </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center' }}>
-              {quickPrompts.slice(0, 3).map((qp, i) => (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
+              {quickPrompts.slice(0, 4).map((qp, i) => (
                 <button
                   key={i}
                   onClick={() => !isLoading && onSendMessage(qp.text)}
                   disabled={isLoading}
-                  className="btn-secondary"
-                  style={{ fontSize: '0.75rem', padding: '5px 10px' }}
+                  className="btn-cyber btn-cyber-outline"
+                  style={{ fontSize: '0.72rem', padding: '6px 12px' }}
                 >
-                  {qp.label}
+                  <span>{qp.label}</span>
                 </button>
               ))}
             </div>
@@ -119,82 +230,105 @@ export default function ChatView({
                 display: 'flex',
                 flexDirection: 'column',
                 alignSelf: isUser ? 'flex-end' : 'flex-start',
-                maxWidth: isUser ? '75%' : '85%',
-                gap: '4px'
+                maxWidth: isUser ? '75%' : '88%',
+                gap: '6px'
               }}
             >
               {/* Message Bubble */}
               <div
+                className="cyber-chamfer-sm"
                 style={{
-                  padding: '12px 16px',
-                  borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                  background: isUser
-                    ? 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)'
-                    : 'rgba(22, 29, 46, 0.85)',
-                  border: isUser ? 'none' : '1px solid var(--border-subtle)',
-                  color: '#f8fafc',
-                  fontSize: '0.9rem',
-                  lineHeight: 1.55,
-                  boxShadow: isUser ? '0 4px 14px rgba(79, 70, 229, 0.3)' : '0 4px 20px rgba(0, 0, 0, 0.2)'
+                  padding: '14px 18px',
+                  background: isUser ? 'rgba(255, 0, 255, 0.08)' : 'rgba(18, 18, 26, 0.95)',
+                  border: isUser ? '1px solid var(--hot-magenta)' : '1px solid var(--cyber-border)',
+                  borderLeft: isUser ? '3px solid var(--hot-magenta)' : '3px solid var(--neon-green)',
+                  boxShadow: isUser ? '0 0 15px rgba(255, 0, 255, 0.2)' : '0 0 15px rgba(0, 255, 136, 0.1)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.88rem',
+                  lineHeight: 1.6,
+                  fontFamily: 'var(--font-mono)'
                 }}
               >
-                {/* Text */}
-                <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
-
-                {/* Timestamp & Sim Badge */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  marginTop: '8px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.08)',
-                  fontSize: '0.68rem', color: isUser ? 'rgba(255,255,255,0.7)' : 'var(--text-muted)'
-                }}>
-                  <span>{isUser ? activeUser.toUpperCase() : 'MEMORY OS'}</span>
-                  <span>{msg.simulated_date ? `Sim: ${msg.simulated_date.slice(0, 10)}` : new Date(msg.created_at || Date.now()).toLocaleTimeString()}</span>
+                {/* Header Tag */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: '8px',
+                    paddingBottom: '6px',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                    fontSize: '0.7rem',
+                    fontFamily: 'var(--font-tech)',
+                    fontWeight: 700,
+                    letterSpacing: '0.1em'
+                  }}
+                >
+                  <span style={{ color: isUser ? 'var(--hot-magenta)' : 'var(--neon-green)' }}>
+                    {isUser ? `> <OPERATOR::${activeUser.toUpperCase()}>` : '> [MEMORY_CORE.SYS]'}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.65rem' }}>
+                    {msg.simulated_date ? `SIM: ${msg.simulated_date.slice(0, 10)}` : new Date(msg.created_at || Date.now()).toLocaleTimeString()}
+                  </span>
                 </div>
+
+                <div>{renderFormattedText(msg.content)}</div>
               </div>
 
-              {/* Attribution & Conflict Resolution Accordion (for Assistant responses) */}
+              {/* Cognitive Attribution Trace */}
               {!isUser && hasAttribution && (
                 <div
-                  className="glass-panel-subtle"
+                  className="cyber-chamfer-sm"
                   style={{
-                    marginTop: '4px',
-                    padding: '8px 12px',
-                    borderRadius: '8px',
-                    fontSize: '0.75rem',
-                    border: '1px solid rgba(99, 102, 241, 0.25)',
-                    background: 'rgba(14, 19, 32, 0.8)'
+                    marginTop: '2px',
+                    padding: '10px 14px',
+                    border: '1px solid var(--electric-cyan)',
+                    borderLeft: '3px solid var(--electric-cyan)',
+                    background: 'rgba(10, 10, 15, 0.98)',
+                    boxShadow: '0 0 15px rgba(0, 212, 255, 0.15)',
+                    fontSize: '0.74rem',
+                    fontFamily: 'var(--font-mono)'
                   }}
                 >
                   <div
                     onClick={() => toggleTrace(idx)}
                     style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      cursor: 'pointer', userSelect: 'none'
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      cursor: 'pointer',
+                      userSelect: 'none'
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Eye size={13} color="#06b6d4" />
-                      <span style={{ fontWeight: 600, color: '#38bdf8' }}>
-                        Memory Attribution & Reasoning Trace
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Terminal size={13} color="var(--electric-cyan)" />
+                      <span className="font-heading" style={{ fontWeight: 700, color: 'var(--electric-cyan)', letterSpacing: '0.08em', fontSize: '0.75rem' }}>
+                        COGNITIVE ATTRIBUTION & REASONING TRACE
                       </span>
-                      <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
-                        ({msg.used_memories?.length || 0} active used, {msg.superseded_memories?.length || 0} superseded filtered)
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
+                        [{msg.used_memories?.length || 0} ACTIVE // {msg.superseded_memories?.length || 0} SUPERSEDED]
                       </span>
                     </div>
-                    {isExpanded ? <ChevronUp size={14} color="#94a3b8" /> : <ChevronDown size={14} color="#94a3b8" />}
+                    {isExpanded ? <ChevronUp size={13} color="var(--electric-cyan)" /> : <ChevronDown size={13} color="var(--electric-cyan)" />}
                   </div>
 
                   {isExpanded && (
-                    <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       {/* Conflict Resolution Notes */}
                       {msg.conflict_notes?.length > 0 && (
-                        <div style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '6px 10px', borderRadius: '6px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#fbbf24', fontWeight: 600, marginBottom: '2px' }}>
+                        <div
+                          style={{
+                            background: 'rgba(255, 170, 0, 0.08)',
+                            border: '1px solid var(--alert-amber)',
+                            padding: '8px 12px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--alert-amber)', fontWeight: 700, marginBottom: '4px' }}>
                             <AlertTriangle size={13} />
-                            <span>Contradiction Mutation Handled</span>
+                            <span>&gt; CONTRADICTION MUTATION RESOLVED:</span>
                           </div>
                           {msg.conflict_notes.map((note, nIdx) => (
-                            <div key={nIdx} style={{ color: '#fef3c7', fontSize: '0.72rem' }}>• {note}</div>
+                            <div key={nIdx} style={{ color: '#FFE0B2', fontSize: '0.72rem' }}>• {note}</div>
                           ))}
                         </div>
                       )}
@@ -202,29 +336,31 @@ export default function ChatView({
                       {/* Active Memories Consulted */}
                       {msg.used_memories?.length > 0 && (
                         <div>
-                          <span style={{ color: '#34d399', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
-                            <CheckCircle size={12} /> Active Memories Consulted:
+                          <span style={{ color: 'var(--neon-green)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                            <CheckCircle size={12} /> &gt; ACTIVE TRUTH BELIEFS CONSULTED:
                           </span>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             {msg.used_memories.map((m, mIdx) => (
                               <div
                                 key={mIdx}
                                 onClick={() => onSelectMemory && onSelectMemory(m.memory_id)}
+                                className="cyber-chamfer-sm"
                                 style={{
-                                  padding: '5px 8px', borderRadius: '4px',
-                                  background: 'rgba(16, 185, 129, 0.1)',
-                                  border: '1px solid rgba(16, 185, 129, 0.25)',
-                                  cursor: 'pointer'
+                                  padding: '8px 12px',
+                                  background: 'rgba(0, 255, 136, 0.06)',
+                                  border: '1px solid var(--neon-green)',
+                                  cursor: 'pointer',
+                                  boxShadow: '0 0 8px rgba(0, 255, 136, 0.1)'
                                 }}
                               >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#e2e8f0' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#FFFFFF', fontWeight: 600 }}>
                                   <span>{m.content}</span>
-                                  <span style={{ color: '#34d399', fontFamily: 'var(--font-mono)' }}>Sim: {m.similarity_score}</span>
+                                  <span style={{ color: 'var(--neon-green)' }}>SIM: {m.similarity_score}</span>
                                 </div>
-                                <div style={{ display: 'flex', gap: '8px', marginTop: '2px', color: 'var(--text-muted)', fontSize: '0.66rem' }}>
+                                <div style={{ display: 'flex', gap: '12px', marginTop: '4px', color: 'var(--text-muted)', fontSize: '0.66rem' }}>
                                   <span>ID: #{m.memory_id?.slice(0, 6)}</span>
-                                  <span>Type: {m.memory_type}</span>
-                                  <span>{m.valid_interval}</span>
+                                  <span>TYPE: {m.memory_type}</span>
+                                  <span>INTERVAL: {m.valid_interval}</span>
                                 </div>
                               </div>
                             ))}
@@ -232,26 +368,27 @@ export default function ChatView({
                         </div>
                       )}
 
-                      {/* Superseded / Filtered Memories */}
+                      {/* Superseded Historical State */}
                       {msg.superseded_memories?.length > 0 && (
                         <div>
-                          <span style={{ color: '#fbbf24', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
-                            <Clock size={12} /> Filtered Outdated/Superseded Memories:
+                          <span style={{ color: 'var(--alert-amber)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                            <Clock size={12} /> &gt; OUTDATED / SUPERSEDED LINEAGE:
                           </span>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             {msg.superseded_memories.map((m, mIdx) => (
                               <div
                                 key={mIdx}
+                                className="cyber-chamfer-sm"
                                 style={{
-                                  padding: '5px 8px', borderRadius: '4px',
-                                  background: 'rgba(245, 158, 11, 0.08)',
-                                  border: '1px solid rgba(245, 158, 11, 0.25)',
+                                  padding: '8px 12px',
+                                  background: 'rgba(255, 170, 0, 0.06)',
+                                  border: '1px solid var(--alert-amber)',
                                   color: '#cbd5e1'
                                 }}
                               >
-                                <div style={{ textDecoration: 'line-through', opacity: 0.8 }}>{m.content}</div>
-                                <div style={{ color: '#fbbf24', fontSize: '0.68rem', marginTop: '2px' }}>
-                                  Reason: {m.filter_reason}
+                                <div style={{ textDecoration: 'line-through', opacity: 0.75 }}>{m.content}</div>
+                                <div style={{ color: 'var(--alert-amber)', fontSize: '0.68rem', marginTop: '3px' }}>
+                                  REASON: {m.filter_reason}
                                 </div>
                               </div>
                             ))}
@@ -267,9 +404,10 @@ export default function ChatView({
         })}
 
         {isLoading && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)', fontSize: '0.8rem', padding: '8px' }}>
-            <div className="animate-pulse-glow" style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#06b6d4' }}></div>
-            <span>Evaluating cognitive state, resolving contradictions & querying memory index...</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--neon-green)', fontSize: '0.8rem', padding: '10px', fontFamily: 'var(--font-mono)' }}>
+            <div className="animate-pulse-glow" style={{ width: '8px', height: '8px', background: 'var(--neon-green)', boxShadow: '0 0 10px var(--neon-green)' }} />
+            <span>&gt; RECONCILING COGNITIVE STATE, RESOLVING CONTRADICTIONS...</span>
+            <span className="cursor-blink">█</span>
           </div>
         )}
 
@@ -277,38 +415,56 @@ export default function ChatView({
       </div>
 
       {/* Suggested Fast Prompts */}
-      <div style={{ padding: '6px 16px', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: '6px', overflowX: 'auto' }}>
+      <div
+        style={{
+          padding: '8px 16px',
+          background: 'rgba(18, 18, 26, 0.95)',
+          borderTop: '1px solid var(--cyber-border)',
+          display: 'flex',
+          gap: '8px',
+          overflowX: 'auto'
+        }}
+      >
         {quickPrompts.map((qp, i) => (
           <button
             key={i}
             onClick={() => !isLoading && onSendMessage(qp.text)}
             disabled={isLoading}
-            className="btn-secondary"
-            style={{ fontSize: '0.72rem', padding: '4px 8px', whiteSpace: 'nowrap', borderRadius: '12px' }}
+            className="btn-cyber btn-cyber-outline"
+            style={{ fontSize: '0.7rem', padding: '4px 10px', whiteSpace: 'nowrap' }}
           >
-            {qp.label}
+            <span>{qp.label}</span>
           </button>
         ))}
       </div>
 
-      {/* Input Bar */}
-      <form onSubmit={handleSubmit} style={{ padding: '12px 16px', background: 'var(--bg-secondary)', display: 'flex', gap: '10px' }}>
+      {/* Chat Input */}
+      <form
+        onSubmit={handleSubmit}
+        style={{
+          padding: '14px 18px',
+          background: 'var(--cyber-black)',
+          borderTop: '2px solid var(--neon-green)',
+          display: 'flex',
+          gap: '12px'
+        }}
+      >
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={`Speak with MemoryOS as ${activeUser.toUpperCase()} (declare a fact, change a preference, or ask a question)...`}
-          style={{ flex: 1, fontSize: '0.88rem' }}
+          placeholder={`> COMMAND MEMORY_OS AS ${activeUser.toUpperCase()} (DECLARE FACT, UPDATE STATE, OR QUERY)...`}
+          className="cyber-input"
+          style={{ flex: 1 }}
           disabled={isLoading}
         />
         <button
           type="submit"
-          className="btn-primary"
+          className="btn-cyber btn-cyber-primary"
           disabled={isLoading || !input.trim()}
-          style={{ opacity: isLoading || !input.trim() ? 0.6 : 1 }}
         >
-          <Send size={16} />
-          Send
+          <Send size={14} />
+          <span>EXECUTE</span>
         </button>
       </form>
     </div>

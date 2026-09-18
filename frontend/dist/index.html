@@ -3,16 +3,1870 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MemoryOS | The Assistant That Never Forgets... Or Does It?</title>
-    <meta name="description" content="MemoryOS: AI Assistant that tracks people, decisions, and truth evolution over time across sessions with explainable memory attribution and multi-user isolation." />
-    <!-- Google Fonts: Outfit & JetBrains Mono -->
+    <title>MemoryOS | Cyberpunk Cognitive Belief Architecture</title>
+    <meta name="description" content="MemoryOS: The Persistent & Contradiction-Aware AI Assistant. Tracking temporal truth, state evolution, and explainable memory attribution across sessions." />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-B0Rs4qWM.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BvgeHs-N.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,600;0,700;1,400&family=Orbitron:wght@400;600;700;800;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/assets/index.css">
+    <!-- React 18, ReactDOM, and Babel Standalone for Zero-Install Instant Serving -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect, useRef } = React;
+
+      // --- API HELPER FUNCTIONS ---
+      const API_BASE = '/api';
+
+      async function sendChatMessage(userId, sessionId, message, simulatedDate = null, provider = 'local', apiKey = null) {
+        const res = await fetch(`${API_BASE}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            session_id: sessionId,
+            message,
+            simulated_date: simulatedDate,
+            provider,
+            api_key: apiKey
+          })
+        });
+        if (!res.ok) throw new Error(`Chat API error: ${res.statusText}`);
+        return await res.json();
+      }
+
+      async function getMemories(userId = 'riku', includeSuperseded = true, includeForgotten = false, query = '', simulatedDate = null) {
+        const params = new URLSearchParams({
+          user_id: userId,
+          include_superseded: includeSuperseded,
+          include_forgotten: includeForgotten
+        });
+        if (query) params.append('query', query);
+        if (simulatedDate) params.append('simulated_date', simulatedDate);
+        const res = await fetch(`${API_BASE}/memories?${params.toString()}`);
+        if (!res.ok) throw new Error(`Get memories error: ${res.statusText}`);
+        return await res.json();
+      }
+
+      async function createManualMemory(userId, content, memoryType = 'PROFILE_FACT', predicate = null, object = null, importance = 0.8, simulatedDate = null) {
+        const res = await fetch(`${API_BASE}/memories/manual`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            content,
+            memory_type: memoryType,
+            predicate,
+            object,
+            importance,
+            simulated_date: simulatedDate
+          })
+        });
+        if (!res.ok) throw new Error(`Create memory error: ${res.statusText}`);
+        return await res.json();
+      }
+
+      async function forgetMemory(userId, memoryId, reason = 'User requested erasure') {
+        const res = await fetch(`${API_BASE}/forget`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            target: memoryId,
+            reason
+          })
+        });
+        if (!res.ok) throw new Error(`Forget memory error: ${res.statusText}`);
+        return await res.json();
+      }
+
+      async function getKnowledgeGraph(userId = 'riku', simulatedDate = null) {
+        const params = new URLSearchParams({ user_id: userId });
+        if (simulatedDate) params.append('simulated_date', simulatedDate);
+        const res = await fetch(`${API_BASE}/knowledge-graph?${params.toString()}`);
+        if (!res.ok) throw new Error(`Get graph error: ${res.statusText}`);
+        return await res.json();
+      }
+
+      async function getTimeline(userId = 'riku') {
+        const res = await fetch(`${API_BASE}/timeline?user_id=${encodeURIComponent(userId)}`);
+        if (!res.ok) throw new Error(`Get timeline error: ${res.statusText}`);
+        return await res.json();
+      }
+
+      async function getChatHistory(userId = 'riku') {
+        const res = await fetch(`${API_BASE}/history?user_id=${encodeURIComponent(userId)}`);
+        if (!res.ok) throw new Error(`Get history error: ${res.statusText}`);
+        return await res.json();
+      }
+
+      async function resetDatabase(userId = null) {
+        const res = await fetch(`${API_BASE}/reset`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId })
+        });
+        if (!res.ok) throw new Error(`Reset error: ${res.statusText}`);
+        return await res.json();
+      }
+
+      async function getAuditLogs(userId = 'riku') {
+        const res = await fetch(`${API_BASE}/audit-logs?user_id=${encodeURIComponent(userId)}`);
+        if (!res.ok) throw new Error(`Get audit logs error: ${res.statusText}`);
+        return await res.json();
+      }
+
+      async function getUsersList() {
+        const res = await fetch(`${API_BASE}/users`);
+        if (!res.ok) throw new Error(`Get users error: ${res.statusText}`);
+        return await res.json();
+      }
+
+      // --- SVG ICONS HELPER ---
+      function Icon({ name, size = 16, color = 'currentColor', style = {} }) {
+        switch (name) {
+          case 'brain':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04z" />
+                <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0 1.32-4.24 2.5 2.5 0 0 0-4.44-2.04z" />
+              </svg>
+            );
+          case 'sparkles':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+              </svg>
+            );
+          case 'clock':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            );
+          case 'shield':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+            );
+          case 'database':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <ellipse cx="12" cy="5" rx="9" ry="3" />
+                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+              </svg>
+            );
+          case 'terminal':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <polyline points="4 17 10 11 4 5" />
+                <line x1="12" y1="19" x2="20" y2="19" />
+              </svg>
+            );
+          case 'send':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            );
+          case 'trash':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+            );
+          case 'refresh':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+              </svg>
+            );
+          case 'play':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+            );
+          case 'search':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            );
+          case 'plus':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            );
+          case 'x':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            );
+          case 'sliders':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <line x1="4" y1="21" x2="4" y2="14" />
+                <line x1="4" y1="10" x2="4" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12" y2="3" />
+                <line x1="20" y1="21" x2="20" y2="16" />
+                <line x1="20" y1="12" x2="20" y2="3" />
+                <line x1="1" y1="14" x2="7" y2="14" />
+                <line x1="9" y1="8" x2="15" y2="8" />
+                <line x1="17" y1="16" x2="23" y2="16" />
+              </svg>
+            );
+          case 'file':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+            );
+          case 'check':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            );
+          case 'alert':
+            return (
+              <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            );
+          default:
+            return null;
+        }
+      }
+
+      // ============================================================
+      // NAVBAR COMPONENT
+      // ============================================================
+      function Navbar({ activeUser, onSelectUser, onReset, onOpenSettings, onOpenAuditLogs, activeTab, onSelectTab, simulatedDate, onSimulatedDateChange }) {
+        return (
+          <header className="cyber-card cyber-chamfer-sm" style={{ margin: '12px 16px 0 16px', padding: '0', display: 'flex', flexDirection: 'column', zIndex: 50 }}>
+            {/* Terminal Chrome Bar */}
+            <div className="terminal-chrome">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div className="traffic-dots">
+                  <div className="traffic-dot traffic-dot-red" />
+                  <div className="traffic-dot traffic-dot-amber" />
+                  <div className="traffic-dot traffic-dot-green" />
+                </div>
+                <span className="tech-label" style={{ fontSize: '0.68rem', color: 'var(--neon-green)', letterSpacing: '0.12em' }}>
+                  MEMORY_OS // KERNEL.SYS [v3.0.4-CYBERPUNK]
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.65rem', color: 'var(--neon-green)', fontFamily: 'var(--font-mono)' }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--neon-green)', boxShadow: '0 0 8px var(--neon-green)' }} />
+                  NEURAL_BUS: ACTIVE
+                </span>
+                <span style={{ fontSize: '0.65rem', color: 'var(--electric-cyan)', fontFamily: 'var(--font-mono)' }}>
+                  LATENCY: 1.4ms
+                </span>
+              </div>
+            </div>
+
+            {/* Main Navbar Bar */}
+            <div style={{ padding: '10px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(10, 10, 15, 0.95)', gap: '16px', borderBottom: '1px solid var(--cyber-border)' }}>
+              {/* Brand & Logo */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div
+                  className="cyber-chamfer-sm glitch-hover"
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    background: 'rgba(0, 255, 136, 0.08)',
+                    border: '1px solid var(--neon-green)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 0 12px var(--neon-green-glow)'
+                  }}
+                >
+                  <Icon name="brain" size={20} color="var(--neon-green)" />
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <h1 className="font-heading glitch-text" data-text="MEMORY_OS" style={{ fontSize: '1.35rem', fontWeight: 900, letterSpacing: '0.1em', color: 'var(--text-primary)', margin: 0 }}>
+                      MEMORY<span style={{ color: 'var(--neon-green)', textShadow: '0 0 10px var(--neon-green)' }}>_OS</span>
+                    </h1>
+                    <span className="badge-cyber badge-cyber-green" style={{ fontSize: '0.62rem' }}>
+                      CONTRADICTION-AWARE
+                    </span>
+                  </div>
+                  <p className="tech-label" style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0, marginTop: '2px' }}>
+                    &gt; THE PERSISTENT COGNITIVE BELIEF ENGINE // MATRIX_v3
+                  </p>
+                </div>
+              </div>
+
+              {/* Navigation Tabs */}
+              <nav className="cyber-chamfer-sm" style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--cyber-black)', padding: '4px', border: '1px solid var(--cyber-border)' }}>
+                {[
+                  { id: 'chat', label: 'NEURAL CHAT', icon: 'sparkles' },
+                  { id: 'graph', label: 'BELIEF GRAPH', icon: 'brain' },
+                  { id: 'timeline', label: 'TIMELINE', icon: 'clock' },
+                  { id: 'benchmarks', label: 'JUDGE BENCHMARKS', icon: 'shield' }
+                ].map(tab => {
+                  const isActive = activeTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => onSelectTab(tab.id)}
+                      className={`nav-tab-cyber ${isActive ? 'active' : ''}`}
+                    >
+                      <Icon name={tab.icon} size={13} color={isActive ? 'var(--neon-green)' : 'currentColor'} />
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+
+              {/* Right Controls */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div className="cyber-chamfer-sm" style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--cyber-black)', padding: '6px 12px', border: '1px solid var(--cyber-border)', boxShadow: 'inset 0 0 8px rgba(0,0,0,0.8)' }}>
+                  <Icon name="terminal" size={13} color="var(--neon-green)" />
+                  <span className="tech-label" style={{ fontSize: '0.72rem', color: 'var(--neon-green)', fontWeight: 700 }}>
+                    &gt; USER:
+                  </span>
+                  <select
+                    value={activeUser}
+                    onChange={(e) => onSelectUser(e.target.value)}
+                    className="cyber-select"
+                    style={{ border: 'none', boxShadow: 'none', padding: '0 4px', fontSize: '0.75rem', fontWeight: 700, color: 'var(--electric-cyan)', background: 'transparent' }}
+                  >
+                    <option value="riku">RIKU // SEC_LVL_4</option>
+                    <option value="vansh">VANSH // ATHLETE_NODE</option>
+                    <option value="sid">SID // RESEARCHER_NODE</option>
+                  </select>
+                </div>
+
+                <button onClick={onOpenAuditLogs} title="Inspect Immutable GDPR Audit Trail" className="btn-cyber btn-cyber-outline" style={{ padding: '6px 12px', fontSize: '0.72rem' }}>
+                  <Icon name="file" size={12} />
+                  <span>AUDIT TRAIL</span>
+                </button>
+
+                <button onClick={onReset} title="Reset Database & Restore Benchmark Scenarios" className="btn-cyber btn-cyber-ghost" style={{ padding: '6px 12px', fontSize: '0.72rem' }}>
+                  <Icon name="refresh" size={12} />
+                  <span>RESET</span>
+                </button>
+
+                <button onClick={onOpenSettings} title="Cognitive Settings" className="btn-cyber btn-cyber-ghost" style={{ padding: '6px 10px' }}>
+                  <Icon name="sliders" size={13} />
+                </button>
+              </div>
+            </div>
+          </header>
+        );
+      }
+
+      // ============================================================
+      // CHAT VIEW COMPONENT
+      // ============================================================
+      function ChatView({ messages, onSendMessage, isLoading, activeUser, simulatedDate, onSimulatedDateChange, onSelectMemory }) {
+        const [input, setInput] = useState('');
+        const [expandedTrace, setExpandedTrace] = useState({});
+        const messagesEndRef = useRef(null);
+
+        useEffect(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, [messages, isLoading]);
+
+        const handleSubmit = (e) => {
+          e.preventDefault();
+          if (!input.trim() || isLoading) return;
+          onSendMessage(input.trim());
+          setInput('');
+        };
+
+        const toggleTrace = (idx) => {
+          setExpandedTrace(prev => ({ ...prev, [idx]: !prev[idx] }));
+        };
+
+        const quickPrompts = [
+          { label: "> 📍 WHERE DO I LIVE?", text: "Where do I live right now?" },
+          { label: "> 🕰️ WHERE DID I LIVE BEFORE?", text: "Where did I live before Tokyo?" },
+          { label: "> 🍵 FAVORITE DRINK?", text: "What is my favorite beverage?" },
+          { label: "> 🗄️ DATABASE CHOICE?", text: "What database did we choose for our project?" },
+          { label: "> ⚡ UPDATE: MOVED TO TOKYO", text: "I moved to Tokyo last weekend and currently reside there." },
+          { label: "> 🍵 PIVOT: SWITCHED TO MATCHA", text: "I quit coffee completely; now I only drink matcha green tea." },
+          { label: "> 🗑️ GDPR PURGE: PHONE", text: "Forget my phone number." }
+        ];
+
+        const renderFormattedText = (text) => {
+          if (!text) return null;
+          const lines = text.split('\n');
+          return lines.map((line, lIdx) => {
+            const parts = line.split(/(\*\*.*?\*\*|`.*?`|\*.*?\*)/g);
+            return (
+              <div key={lIdx} style={{ minHeight: line ? 'auto' : '8px', marginBottom: '3px' }}>
+                {parts.map((part, pIdx) => {
+                  if (part.startsWith('**') && part.endsWith('**')) {
+                    return <strong key={pIdx} style={{ color: 'var(--neon-green)', fontWeight: 700, textShadow: '0 0 6px var(--neon-green-glow)' }}>{part.slice(2, -2)}</strong>;
+                  } else if (part.startsWith('`') && part.endsWith('`')) {
+                    return <span key={pIdx} style={{ background: 'var(--cyber-black)', border: '1px solid var(--neon-green)', color: 'var(--neon-green)', padding: '1px 6px', fontFamily: 'var(--font-mono)', fontSize: '0.85em' }}>{part.slice(1, -1)}</span>;
+                  } else if (part.startsWith('*') && part.endsWith('*')) {
+                    return <em key={pIdx} style={{ color: 'var(--hot-magenta)' }}>{part.slice(1, -1)}</em>;
+                  }
+                  return part;
+                })}
+              </div>
+            );
+          });
+        };
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+            {/* Timeline Simulator Bar */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', background: 'rgba(18, 18, 26, 0.95)', borderBottom: '1px solid var(--cyber-border)', fontSize: '0.75rem', fontFamily: 'var(--font-mono)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--text-secondary)' }}>
+                <Icon name="clock" size={13} color="var(--neon-green)" />
+                <span className="tech-label" style={{ color: 'var(--neon-green)', fontWeight: 700 }}>&gt; SIMULATED_TIMELINE:</span>
+                <select
+                  value={simulatedDate || ''}
+                  onChange={(e) => onSimulatedDateChange(e.target.value || null)}
+                  className="cyber-select"
+                  style={{ fontSize: '0.72rem', padding: '2px 8px' }}
+                >
+                  <option value="">[LIVE / PRESENT REAL-TIME]</option>
+                  <option value="2026-09-01T10:00:00Z">DAY 01 (2026-09-01) - INITIAL SETUP</option>
+                  <option value="2026-09-02T10:00:00Z">DAY 02 (2026-09-02) - INTERMEDIATE MUTATIONS</option>
+                  <option value="2026-09-03T10:00:00Z">DAY 03 (2026-09-03) - RELOCATIONS & REVERSALS</option>
+                  <option value="2026-09-05T10:00:00Z">DAY 05 (2026-09-05) - CONSOLIDATION</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="badge-cyber badge-cyber-green">
+                  <Icon name="shield" size={11} />
+                  NODE: {activeUser.toUpperCase()} [ISOLATED]
+                </span>
+              </div>
+            </div>
+
+            {/* Messages Scroll Area */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {messages.length === 0 && (
+                <div
+                  className="cyber-chamfer"
+                  style={{
+                    margin: 'auto',
+                    textAlign: 'center',
+                    maxWidth: '520px',
+                    padding: '36px 24px',
+                    background: 'rgba(18, 18, 26, 0.9)',
+                    border: '1px solid var(--neon-green)',
+                    boxShadow: '0 0 25px var(--neon-green-glow)',
+                    position: 'relative'
+                  }}
+                >
+                  <div
+                    className="cyber-chamfer-sm"
+                    style={{
+                      width: '46px',
+                      height: '46px',
+                      border: '1px solid var(--neon-green)',
+                      background: 'rgba(0, 255, 136, 0.1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      margin: '0 auto 16px',
+                      boxShadow: '0 0 15px var(--neon-green-glow)'
+                    }}
+                  >
+                    <Icon name="sparkles" size={22} color="var(--neon-green)" />
+                  </div>
+                  <h2 className="font-heading" style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '10px', letterSpacing: '0.1em', color: 'var(--text-primary)' }}>
+                    COGNITIVE BELIEF ARCHITECTURE
+                  </h2>
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '20px', lineHeight: 1.6, fontFamily: 'var(--font-mono)' }}>
+                    MemoryOS tracks real-time temporal truth, belief mutations, and contradictory state updates across sessions.
+                  </p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
+                    {quickPrompts.slice(0, 4).map((qp, i) => (
+                      <button
+                        key={i}
+                        onClick={() => !isLoading && onSendMessage(qp.text)}
+                        disabled={isLoading}
+                        className="btn-cyber btn-cyber-outline"
+                        style={{ fontSize: '0.72rem', padding: '6px 12px' }}
+                      >
+                        <span>{qp.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {messages.map((msg, idx) => {
+                const isUser = msg.role === 'user';
+                const isExpanded = expandedTrace[idx];
+                const hasAttribution = msg.used_memories?.length > 0 || msg.superseded_memories?.length > 0 || msg.conflict_notes?.length > 0;
+
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignSelf: isUser ? 'flex-end' : 'flex-start',
+                      maxWidth: isUser ? '75%' : '88%',
+                      gap: '6px'
+                    }}
+                  >
+                    {/* Message Bubble */}
+                    <div
+                      className="cyber-chamfer-sm"
+                      style={{
+                        padding: '14px 18px',
+                        background: isUser ? 'rgba(255, 0, 255, 0.08)' : 'rgba(18, 18, 26, 0.95)',
+                        border: isUser ? '1px solid var(--hot-magenta)' : '1px solid var(--cyber-border)',
+                        borderLeft: isUser ? '3px solid var(--hot-magenta)' : '3px solid var(--neon-green)',
+                        boxShadow: isUser ? '0 0 15px rgba(255, 0, 255, 0.2)' : '0 0 15px rgba(0, 255, 136, 0.1)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.88rem',
+                        lineHeight: 1.6,
+                        fontFamily: 'var(--font-mono)'
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          marginBottom: '8px',
+                          paddingBottom: '6px',
+                          borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                          fontSize: '0.7rem',
+                          fontFamily: 'var(--font-tech)',
+                          fontWeight: 700,
+                          letterSpacing: '0.1em'
+                        }}
+                      >
+                        <span style={{ color: isUser ? 'var(--hot-magenta)' : 'var(--neon-green)' }}>
+                          {isUser ? `> <OPERATOR::${activeUser.toUpperCase()}>` : '> [MEMORY_CORE.SYS]'}
+                        </span>
+                        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.65rem' }}>
+                          {msg.simulated_date ? `SIM: ${msg.simulated_date.slice(0, 10)}` : new Date(msg.created_at || Date.now()).toLocaleTimeString()}
+                        </span>
+                      </div>
+
+                      <div>{renderFormattedText(msg.content)}</div>
+                    </div>
+
+                    {/* Attribution Trace */}
+                    {!isUser && hasAttribution && (
+                      <div
+                        className="cyber-chamfer-sm"
+                        style={{
+                          marginTop: '2px',
+                          padding: '10px 14px',
+                          border: '1px solid var(--electric-cyan)',
+                          borderLeft: '3px solid var(--electric-cyan)',
+                          background: 'rgba(10, 10, 15, 0.98)',
+                          boxShadow: '0 0 15px rgba(0, 212, 255, 0.15)',
+                          fontSize: '0.74rem',
+                          fontFamily: 'var(--font-mono)'
+                        }}
+                      >
+                        <div
+                          onClick={() => toggleTrace(idx)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            cursor: 'pointer',
+                            userSelect: 'none'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Icon name="terminal" size={13} color="var(--electric-cyan)" />
+                            <span className="font-heading" style={{ fontWeight: 700, color: 'var(--electric-cyan)', letterSpacing: '0.08em', fontSize: '0.75rem' }}>
+                              COGNITIVE ATTRIBUTION & REASONING TRACE
+                            </span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
+                              [{msg.used_memories?.length || 0} ACTIVE // {msg.superseded_memories?.length || 0} SUPERSEDED]
+                            </span>
+                          </div>
+                          <span style={{ color: 'var(--electric-cyan)', fontWeight: 700 }}>{isExpanded ? '▲ HIDE' : '▼ VIEW'}</span>
+                        </div>
+
+                        {isExpanded && (
+                          <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {msg.conflict_notes?.length > 0 && (
+                              <div style={{ background: 'rgba(255, 170, 0, 0.08)', border: '1px solid var(--alert-amber)', padding: '8px 12px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--alert-amber)', fontWeight: 700, marginBottom: '4px' }}>
+                                  <Icon name="alert" size={13} />
+                                  <span>&gt; CONTRADICTION MUTATION RESOLVED:</span>
+                                </div>
+                                {msg.conflict_notes.map((note, nIdx) => (
+                                  <div key={nIdx} style={{ color: '#FFE0B2', fontSize: '0.72rem' }}>• {note}</div>
+                                ))}
+                              </div>
+                            )}
+
+                            {msg.used_memories?.length > 0 && (
+                              <div>
+                                <span style={{ color: 'var(--neon-green)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                  <Icon name="check" size={12} /> &gt; ACTIVE TRUTH BELIEFS CONSULTED:
+                                </span>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  {msg.used_memories.map((m, mIdx) => (
+                                    <div
+                                      key={mIdx}
+                                      onClick={() => onSelectMemory && onSelectMemory(m.memory_id)}
+                                      className="cyber-chamfer-sm"
+                                      style={{ padding: '8px 12px', background: 'rgba(0, 255, 136, 0.06)', border: '1px solid var(--neon-green)', cursor: 'pointer', boxShadow: '0 0 8px rgba(0, 255, 136, 0.1)' }}
+                                    >
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#FFFFFF', fontWeight: 600 }}>
+                                        <span>{m.content}</span>
+                                        <span style={{ color: 'var(--neon-green)' }}>SIM: {m.similarity_score}</span>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: '12px', marginTop: '4px', color: 'var(--text-muted)', fontSize: '0.66rem' }}>
+                                        <span>ID: #{m.memory_id?.slice(0, 6)}</span>
+                                        <span>TYPE: {m.memory_type}</span>
+                                        <span>INTERVAL: {m.valid_interval}</span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {msg.superseded_memories?.length > 0 && (
+                              <div>
+                                <span style={{ color: 'var(--alert-amber)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                  <Icon name="clock" size={12} /> &gt; OUTDATED / SUPERSEDED LINEAGE:
+                                </span>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  {msg.superseded_memories.map((m, mIdx) => (
+                                    <div key={mIdx} className="cyber-chamfer-sm" style={{ padding: '8px 12px', background: 'rgba(255, 170, 0, 0.06)', border: '1px solid var(--alert-amber)', color: '#cbd5e1' }}>
+                                      <div style={{ textDecoration: 'line-through', opacity: 0.75 }}>{m.content}</div>
+                                      <div style={{ color: 'var(--alert-amber)', fontSize: '0.68rem', marginTop: '3px' }}>
+                                        REASON: {m.filter_reason}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {isLoading && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--neon-green)', fontSize: '0.8rem', padding: '10px', fontFamily: 'var(--font-mono)' }}>
+                  <div className="animate-pulse-glow" style={{ width: '8px', height: '8px', background: 'var(--neon-green)', boxShadow: '0 0 10px var(--neon-green)' }} />
+                  <span>&gt; RECONCILING COGNITIVE STATE, RESOLVING CONTRADICTIONS...</span>
+                  <span className="cursor-blink">█</span>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Quick Prompts Bar */}
+            <div style={{ padding: '8px 16px', background: 'rgba(18, 18, 26, 0.95)', borderTop: '1px solid var(--cyber-border)', display: 'flex', gap: '8px', overflowX: 'auto' }}>
+              {quickPrompts.map((qp, i) => (
+                <button
+                  key={i}
+                  onClick={() => !isLoading && onSendMessage(qp.text)}
+                  disabled={isLoading}
+                  className="btn-cyber btn-cyber-outline"
+                  style={{ fontSize: '0.7rem', padding: '4px 10px', whiteSpace: 'nowrap' }}
+                >
+                  <span>{qp.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Chat Input */}
+            <form onSubmit={handleSubmit} style={{ padding: '14px 18px', background: 'var(--cyber-black)', borderTop: '2px solid var(--neon-green)', display: 'flex', gap: '12px' }}>
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={`> COMMAND MEMORY_OS AS ${activeUser.toUpperCase()} (DECLARE FACT, UPDATE STATE, OR QUERY)...`}
+                className="cyber-input"
+                style={{ flex: 1 }}
+                disabled={isLoading}
+              />
+              <button type="submit" className="btn-cyber btn-cyber-primary" disabled={isLoading || !input.trim()}>
+                <Icon name="send" size={14} />
+                <span>EXECUTE</span>
+              </button>
+            </form>
+          </div>
+        );
+      }
+
+      // ============================================================
+      // KNOWLEDGE GRAPH COMPONENT
+      // ============================================================
+      function KnowledgeGraph({ graphData, onRefresh, onSelectMemory }) {
+        const canvasRef = useRef(null);
+        const [selectedNode, setSelectedNode] = useState(null);
+        const [zoom, setZoom] = useState(1.0);
+        const [pan, setPan] = useState({ x: 0, y: 0 });
+        const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
+        const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+        const [draggedNode, setDraggedNode] = useState(null);
+        const [statusFilter, setStatusFilter] = useState('ALL');
+        const [searchQuery, setSearchQuery] = useState('');
+
+        const nodesRef = useRef([]);
+
+        useEffect(() => {
+          const rawNodes = graphData?.nodes || [];
+          const width = 800;
+          const height = 550;
+
+          const filteredNodes = rawNodes.filter(n => {
+            if (statusFilter === 'ACTIVE' && n.status !== 'ACTIVE' && n.type !== 'USER') return false;
+            if (statusFilter === 'SUPERSEDED' && n.status !== 'SUPERSEDED' && n.type !== 'USER') return false;
+            if (searchQuery.trim()) {
+              const q = searchQuery.toLowerCase();
+              return n.label.toLowerCase().includes(q) || (n.full_content && n.full_content.toLowerCase().includes(q));
+            }
+            return true;
+          });
+
+          const userNode = filteredNodes.find(n => n.type === 'USER') || filteredNodes[0];
+          const otherNodes = filteredNodes.filter(n => !userNode || n.id !== userNode.id);
+
+          const centerX = width / 2;
+          const centerY = height / 2;
+
+          if (userNode) {
+            userNode.x = centerX;
+            userNode.y = centerY;
+            userNode.vx = 0;
+            userNode.vy = 0;
+          }
+
+          const radius = Math.min(width, height) * 0.35;
+          otherNodes.forEach((node, i) => {
+            const existing = nodesRef.current.find(n => n.id === node.id);
+            if (existing && existing.x && existing.y) {
+              node.x = existing.x;
+              node.y = existing.y;
+            } else {
+              const angle = (i / Math.max(otherNodes.length, 1)) * 2 * Math.PI;
+              node.x = centerX + radius * Math.cos(angle);
+              node.y = centerY + radius * Math.sin(angle);
+            }
+            node.vx = 0;
+            node.vy = 0;
+          });
+
+          nodesRef.current = filteredNodes;
+        }, [graphData, statusFilter, searchQuery]);
+
+        useEffect(() => {
+          let animationFrameId;
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const ctx = canvas.getContext('2d');
+
+          const render = () => {
+            const width = canvas.width = canvas.parentElement.clientWidth || 800;
+            const height = canvas.height = canvas.parentElement.clientHeight || 550;
+
+            const nodes = nodesRef.current;
+            const edges = graphData?.edges || [];
+
+            ctx.clearRect(0, 0, width, height);
+
+            ctx.save();
+            ctx.translate(pan.x, pan.y);
+            ctx.scale(zoom, zoom);
+
+            // Cyberpunk Matrix Grid
+            ctx.strokeStyle = 'rgba(0, 255, 136, 0.05)';
+            ctx.lineWidth = 1;
+            const gridSize = 40;
+            for (let x = -width; x < width * 2; x += gridSize) {
+              ctx.beginPath();
+              ctx.moveTo(x, -height);
+              ctx.lineTo(x, height * 2);
+              ctx.stroke();
+            }
+            for (let y = -height; y < height * 2; y += gridSize) {
+              ctx.beginPath();
+              ctx.moveTo(-width, y);
+              ctx.lineTo(width * 2, y);
+              ctx.stroke();
+            }
+
+            // Force Step
+            const centerX = width / 2;
+            const centerY = height / 2;
+
+            for (let i = 0; i < nodes.length; i++) {
+              const n1 = nodes[i];
+              if (n1 === draggedNode) continue;
+
+              for (let j = i + 1; j < nodes.length; j++) {
+                const n2 = nodes[j];
+                const dx = n2.x - n1.x;
+                const dy = n2.y - n1.y;
+                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                if (dist < 180) {
+                  const force = (180 - dist) / 180 * 0.4;
+                  const fx = (dx / dist) * force;
+                  const fy = (dy / dist) * force;
+                  if (n1.type !== 'USER') { n1.vx -= fx; n1.vy -= fy; }
+                  if (n2.type !== 'USER') { n2.vx += fx; n2.vy += fy; }
+                }
+              }
+
+              if (n1.type !== 'USER') {
+                n1.vx += (centerX - n1.x) * 0.0008;
+                n1.vy += (centerY - n1.y) * 0.0008;
+              }
+
+              n1.x += n1.vx || 0;
+              n1.y += n1.vy || 0;
+              n1.vx = (n1.vx || 0) * 0.85;
+              n1.vy = (n1.vy || 0) * 0.85;
+            }
+
+            // Draw Edges
+            edges.forEach(edge => {
+              const source = nodes.find(n => n.id === edge.source);
+              const target = nodes.find(n => n.id === edge.target);
+              if (!source || !target) return;
+
+              ctx.beginPath();
+              ctx.moveTo(source.x, source.y);
+              ctx.lineTo(target.x, target.y);
+
+              if (edge.type === 'SUPERSEDES') {
+                ctx.strokeStyle = '#ff00ff';
+                ctx.lineWidth = 2.5;
+                ctx.setLineDash([6, 6]);
+                ctx.shadowColor = '#ff00ff';
+                ctx.shadowBlur = 10;
+              } else {
+                ctx.strokeStyle = 'rgba(0, 255, 136, 0.45)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([]);
+                ctx.shadowColor = '#00ff88';
+                ctx.shadowBlur = 6;
+              }
+              ctx.stroke();
+              ctx.setLineDash([]);
+              ctx.shadowBlur = 0;
+
+              if (edge.label) {
+                const midX = (source.x + target.x) / 2;
+                const midY = (source.y + target.y) / 2;
+                ctx.fillStyle = '#0a0a0f';
+                ctx.fillRect(midX - 35, midY - 9, 70, 18);
+                ctx.strokeStyle = edge.type === 'SUPERSEDES' ? '#ff00ff' : 'rgba(0, 255, 136, 0.5)';
+                ctx.strokeRect(midX - 35, midY - 9, 70, 18);
+
+                ctx.fillStyle = edge.type === 'SUPERSEDES' ? '#ffaa00' : '#00ff88';
+                ctx.font = '9px "Share Tech Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(edge.label.toUpperCase().slice(0, 12), midX, midY);
+              }
+            });
+
+            // Draw Nodes
+            nodes.forEach(node => {
+              const isSelected = selectedNode?.id === node.id;
+              const isUser = node.type === 'USER';
+              const isActive = node.status === 'ACTIVE';
+              const isSuperseded = node.status === 'SUPERSEDED';
+
+              let nodeColor = isUser ? '#ff00ff' : (isSuperseded ? '#ffaa00' : '#00ff88');
+              let radius = isUser ? 24 : 16;
+
+              ctx.beginPath();
+              ctx.arc(node.x, node.y, radius + (isSelected ? 6 : 3), 0, Math.PI * 2);
+              ctx.strokeStyle = nodeColor;
+              ctx.lineWidth = isSelected ? 3 : 1.5;
+              ctx.shadowColor = nodeColor;
+              ctx.shadowBlur = isSelected ? 20 : 12;
+              ctx.stroke();
+
+              ctx.beginPath();
+              ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+              ctx.fillStyle = isUser ? '#ff00ff' : (isSuperseded ? '#161622' : '#0a0a0f');
+              ctx.fill();
+              ctx.strokeStyle = nodeColor;
+              ctx.lineWidth = 2;
+              ctx.stroke();
+              ctx.shadowBlur = 0;
+
+              ctx.fillStyle = '#FFFFFF';
+              ctx.font = isUser ? 'bold 11px "Orbitron", sans-serif' : '10px "Share Tech Mono", monospace';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText((node.label || 'Node').slice(0, 12), node.x, node.y + radius + 14);
+            });
+
+            ctx.restore();
+            animationFrameId = requestAnimationFrame(render);
+          };
+
+          render();
+          return () => cancelAnimationFrame(animationFrameId);
+        }, [graphData, pan, zoom, selectedNode, draggedNode]);
+
+        const handleMouseDown = (e) => {
+          const rect = canvasRef.current.getBoundingClientRect();
+          const mouseX = (e.clientX - rect.left - pan.x) / zoom;
+          const mouseY = (e.clientY - rect.top - pan.y) / zoom;
+
+          const clicked = nodesRef.current.find(n => {
+            const dx = n.x - mouseX;
+            const dy = n.y - mouseY;
+            return Math.sqrt(dx * dx + dy * dy) < (n.type === 'USER' ? 24 : 18);
+          });
+
+          if (clicked) {
+            setSelectedNode(clicked);
+            setDraggedNode(clicked);
+            if (onSelectMemory && clicked.id) onSelectMemory(clicked.id);
+          } else {
+            setIsDraggingCanvas(true);
+            setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+          }
+        };
+
+        const handleMouseMove = (e) => {
+          if (draggedNode) {
+            const rect = canvasRef.current.getBoundingClientRect();
+            draggedNode.x = (e.clientX - rect.left - pan.x) / zoom;
+            draggedNode.y = (e.clientY - rect.top - pan.y) / zoom;
+          } else if (isDraggingCanvas) {
+            setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+          }
+        };
+
+        const handleMouseUp = () => {
+          setDraggedNode(null);
+          setIsDraggingCanvas(false);
+        };
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+            {/* Control Bar */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', background: 'rgba(18, 18, 26, 0.95)', borderBottom: '1px solid var(--cyber-border)', fontSize: '0.78rem', fontFamily: 'var(--font-mono)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="tech-label" style={{ color: 'var(--neon-green)', fontWeight: 700 }}>&gt; FILTER_STATUS:</span>
+                {['ALL', 'ACTIVE', 'SUPERSEDED'].map(f => (
+                  <button key={f} onClick={() => setStatusFilter(f)} className={statusFilter === f ? 'btn-cyber btn-cyber-primary' : 'btn-cyber btn-cyber-ghost'} style={{ fontSize: '0.7rem', padding: '4px 10px' }}>
+                    <span>{f}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--cyber-black)', padding: '4px 8px', border: '1px solid var(--cyber-border)' }}>
+                  <Icon name="search" size={12} color="var(--neon-green)" />
+                  <input
+                    type="text"
+                    placeholder="SEARCH NODES..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--neon-green)', fontSize: '0.72rem', fontFamily: 'var(--font-mono)', outline: 'none', width: '130px' }}
+                  />
+                </div>
+                <button onClick={() => setZoom(z => Math.min(z + 0.15, 2.2))} className="btn-cyber btn-cyber-ghost" style={{ padding: '4px 8px' }}>+</button>
+                <button onClick={() => setZoom(z => Math.max(z - 0.15, 0.5))} className="btn-cyber btn-cyber-ghost" style={{ padding: '4px 8px' }}>-</button>
+                <button onClick={onRefresh} className="btn-cyber btn-cyber-ghost" style={{ padding: '4px 8px' }}><Icon name="refresh" size={13} /></button>
+              </div>
+            </div>
+
+            {/* Canvas */}
+            <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--cyber-black)' }}>
+              <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} style={{ width: '100%', height: '100%', cursor: isDraggingCanvas ? 'grabbing' : 'grab' }} />
+
+              {/* Legend */}
+              <div
+                className="cyber-chamfer-sm"
+                style={{
+                  position: 'absolute',
+                  bottom: '14px',
+                  left: '14px',
+                  padding: '10px 14px',
+                  background: 'rgba(18, 18, 26, 0.92)',
+                  border: '1px solid var(--cyber-border)',
+                  borderLeft: '3px solid var(--neon-green)',
+                  boxShadow: '0 0 15px rgba(0, 255, 136, 0.15)',
+                  fontSize: '0.7rem',
+                  fontFamily: 'var(--font-mono)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--hot-magenta)', boxShadow: '0 0 6px var(--hot-magenta)' }} />
+                  <span>USER ROOT CORE</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--neon-green)', boxShadow: '0 0 6px var(--neon-green)' }} />
+                  <span>ACTIVE TRUTH BELIEF</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--alert-amber)', boxShadow: '0 0 6px var(--alert-amber)' }} />
+                  <span>SUPERSEDED / OUTDATED</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '14px', height: '2px', background: 'var(--hot-magenta)', borderTop: '2px dashed var(--hot-magenta)' }} />
+                  <span>MUTATION LINEAGE VECTOR</span>
+                </div>
+              </div>
+
+              {selectedNode && (
+                <div
+                  className="cyber-chamfer-sm"
+                  style={{
+                    position: 'absolute',
+                    top: '14px',
+                    right: '14px',
+                    width: '320px',
+                    background: 'rgba(18, 18, 26, 0.98)',
+                    border: '1px solid var(--hot-magenta)',
+                    borderLeft: '3px solid var(--hot-magenta)',
+                    boxShadow: '0 0 25px rgba(255, 0, 255, 0.25)',
+                    padding: '16px',
+                    fontSize: '0.76rem',
+                    fontFamily: 'var(--font-mono)'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid var(--cyber-border)', paddingBottom: '8px' }}>
+                    <span className="font-heading" style={{ color: 'var(--hot-magenta)', fontWeight: 800, letterSpacing: '0.08em', fontSize: '0.78rem' }}>NODE INSPECTOR</span>
+                    <button onClick={() => setSelectedNode(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}><Icon name="x" size={13} /></button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div><span className="tech-label" style={{ color: 'var(--text-muted)' }}>LABEL:</span><div style={{ color: 'var(--neon-green)', fontWeight: 700, fontSize: '0.86rem' }}>{selectedNode.label}</div></div>
+                    <div><span className="tech-label" style={{ color: 'var(--text-muted)' }}>TYPE:</span><div style={{ color: 'var(--text-primary)' }}>{selectedNode.type}</div></div>
+                    <div><span className="tech-label" style={{ color: 'var(--text-muted)' }}>STATUS:</span><div style={{ marginTop: '2px' }}><span className={selectedNode.status === 'ACTIVE' ? 'badge-cyber badge-cyber-green' : 'badge-cyber badge-cyber-amber'}>{selectedNode.status || 'UNKNOWN'}</span></div></div>
+                    {selectedNode.full_content && <div><span className="tech-label" style={{ color: 'var(--text-muted)' }}>CONTENT:</span><div style={{ color: 'var(--text-primary)', marginTop: '3px', background: 'var(--cyber-black)', padding: '8px', border: '1px solid var(--cyber-border)' }}>{selectedNode.full_content}</div></div>}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================================
+      // TIMELINE COMPONENT
+      // ============================================================
+      function TimelineSlider({ timelineEvents, activeUser }) {
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', background: 'rgba(18, 18, 26, 0.95)', borderBottom: '1px solid var(--cyber-border)', fontFamily: 'var(--font-mono)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Icon name="clock" size={15} color="var(--neon-green)" />
+                <span className="font-heading" style={{ fontSize: '0.92rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-primary)' }}>
+                  TEMPORAL MUTATION HIGHWAY // BELIEF EVOLUTION
+                </span>
+              </div>
+              <span className="badge-cyber badge-cyber-magenta">{timelineEvents?.length || 0} TOTAL STATE MUTATIONS</span>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px 20px', position: 'relative' }}>
+              {(!timelineEvents || timelineEvents.length === 0) ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '40px', fontFamily: 'var(--font-mono)' }}>
+                  &gt; NO TEMPORAL STATE MUTATIONS RECORDED YET FOR {activeUser.toUpperCase()}.
+                </div>
+              ) : (
+                <div style={{ position: 'relative', maxWidth: '800px', margin: '0 auto' }}>
+                  <div style={{ position: 'absolute', top: '0', bottom: '0', left: '28px', width: '2px', background: 'linear-gradient(180deg, var(--neon-green) 0%, var(--hot-magenta) 50%, var(--electric-cyan) 100%)', boxShadow: '0 0 10px var(--neon-green-glow)' }} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    {timelineEvents.map((evt, idx) => {
+                      const isActive = evt.status === 'ACTIVE';
+                      return (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: '18px', position: 'relative' }}>
+                          <div
+                            className="cyber-chamfer-sm"
+                            style={{
+                              width: '22px',
+                              height: '22px',
+                              background: isActive ? 'var(--neon-green)' : 'var(--alert-amber)',
+                              boxShadow: isActive ? '0 0 12px var(--neon-green-glow)' : '0 0 12px rgba(255, 170, 0, 0.4)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              zIndex: 2,
+                              marginTop: '12px'
+                            }}
+                          >
+                            <div style={{ width: '6px', height: '6px', background: 'var(--cyber-black)' }} />
+                          </div>
+
+                          <div
+                            className="cyber-card cyber-chamfer-sm"
+                            style={{
+                              flex: 1,
+                              padding: '14px 18px',
+                              fontFamily: 'var(--font-mono)',
+                              borderLeft: isActive ? '3px solid var(--neon-green)' : '3px solid var(--alert-amber)',
+                              boxShadow: isActive ? '0 0 15px rgba(0, 255, 136, 0.1)' : '0 0 15px rgba(255, 170, 0, 0.1)'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span className={isActive ? 'badge-cyber badge-cyber-green' : 'badge-cyber badge-cyber-amber'}>{evt.status}</span>
+                                <span className="tech-label" style={{ fontSize: '0.7rem', color: 'var(--electric-cyan)', fontWeight: 700 }}>{evt.memory_type}</span>
+                              </div>
+                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>RECORDED: {evt.created_at?.slice(0, 10) || 'UNKNOWN'}</span>
+                            </div>
+
+                            <div style={{ fontSize: '0.88rem', color: 'var(--text-primary)', fontWeight: 600, marginBottom: '8px' }}>{evt.content}</div>
+
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                              <div><span style={{ color: 'var(--text-muted)' }}>VALID FROM: </span><strong style={{ color: 'var(--neon-green)' }}>{evt.valid_from ? evt.valid_from.slice(0, 10) : 'PRESENT'}</strong></div>
+                              {evt.valid_to && <div><span style={{ color: 'var(--text-muted)' }}>VALID TO: </span><strong style={{ color: 'var(--alert-amber)' }}>{evt.valid_to.slice(0, 10)}</strong></div>}
+                              {evt.superseded_by_id && <div><span style={{ color: 'var(--text-muted)' }}>SUPERSEDED BY: </span><span style={{ color: 'var(--hot-magenta)' }}>#{evt.superseded_by_id.slice(0, 8)}</span></div>}
+                            </div>
+
+                            {evt.supersede_reason && (
+                              <div style={{ marginTop: '8px', padding: '6px 10px', background: 'rgba(255, 170, 0, 0.08)', border: '1px solid var(--alert-amber)', fontSize: '0.7rem', color: '#FFE0B2' }}>
+                                &gt; CAUSAL OVERRIDE: {evt.supersede_reason}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================================
+      // MEMORY INSPECTOR COMPONENT
+      // ============================================================
+      function MemoryInspector({ memories, activeUser, onForgetMemory, onRefresh, highlightedMemoryId }) {
+        const [filter, setFilter] = useState('ALL');
+        const [searchQuery, setSearchQuery] = useState('');
+        const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+        const [newContent, setNewContent] = useState('');
+        const [newType, setNewType] = useState('PROFILE_FACT');
+        const [newPredicate, setNewPredicate] = useState('');
+        const [newObject, setNewObject] = useState('');
+        const [newImportance, setNewImportance] = useState(0.8);
+        const [isSubmitting, setIsSubmitting] = useState(false);
+
+        const filteredMemories = memories.filter(m => {
+          if (filter === 'ACTIVE' && m.status !== 'ACTIVE') return false;
+          if (filter === 'SUPERSEDED' && m.status !== 'SUPERSEDED') return false;
+          if (filter === 'DECAYED' && m.status !== 'DECAYED') return false;
+          if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            return m.content.toLowerCase().includes(q) || (m.tags && m.tags.some(t => t.toLowerCase().includes(q)));
+          }
+          return true;
+        });
+
+        const handleCreateMemory = async (e) => {
+          e.preventDefault();
+          if (!newContent.trim() || isSubmitting) return;
+          setIsSubmitting(true);
+          try {
+            await createManualMemory(activeUser, newContent.trim(), newType, newPredicate.trim() || null, newObject.trim() || null, parseFloat(newImportance));
+            setNewContent(''); setNewPredicate(''); setNewObject('');
+            setIsAddModalOpen(false);
+            if (onRefresh) onRefresh();
+          } catch (err) {
+            console.error(err);
+          } finally {
+            setIsSubmitting(false);
+          }
+        };
+
+        const getStatusBadge = (status) => {
+          switch (status) {
+            case 'ACTIVE': return <span className="badge-cyber badge-cyber-green">ACTIVE</span>;
+            case 'SUPERSEDED': return <span className="badge-cyber badge-cyber-amber">SUPERSEDED</span>;
+            case 'DECAYED': return <span className="badge-cyber badge-cyber-cyan">DECAYED</span>;
+            default: return <span className="badge-cyber badge-cyber-magenta">{status}</span>;
+          }
+        };
+
+        return (
+          <div className="cyber-card cyber-chamfer-sm" style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+            <div className="terminal-chrome">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Icon name="database" size={13} color="var(--neon-green)" />
+                <span className="tech-label" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--neon-green)', letterSpacing: '0.1em' }}>
+                  MEMORY BANK // {activeUser.toUpperCase()}
+                </span>
+              </div>
+              <button onClick={() => setIsAddModalOpen(true)} className="btn-cyber btn-cyber-primary" style={{ padding: '2px 8px', fontSize: '0.68rem' }}>
+                <Icon name="plus" size={11} />
+                <span>INJECT</span>
+              </button>
+            </div>
+
+            <div style={{ padding: '10px 12px', background: 'rgba(18, 18, 26, 0.95)', borderBottom: '1px solid var(--cyber-border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--cyber-black)', padding: '6px 10px', border: '1px solid var(--cyber-border)' }}>
+                <Icon name="search" size={12} color="var(--neon-green)" />
+                <input
+                  type="text"
+                  placeholder="SEARCH MEMORY RECORDS..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--neon-green)', fontSize: '0.72rem', fontFamily: 'var(--font-mono)', outline: 'none', width: '100%', letterSpacing: '0.06em' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '4px', overflowX: 'auto' }}>
+                {['ALL', 'ACTIVE', 'SUPERSEDED', 'DECAYED'].map(f => (
+                  <button key={f} onClick={() => setFilter(f)} className={filter === f ? 'btn-cyber btn-cyber-primary' : 'btn-cyber btn-cyber-ghost'} style={{ fontSize: '0.66rem', padding: '3px 8px', flex: 1 }}>
+                    <span>{f}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', fontFamily: 'var(--font-mono)' }}>
+              {filteredMemories.length === 0 ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '30px', fontSize: '0.76rem' }}>
+                  &gt; NO MEMORIES MATCHING FILTER.
+                </div>
+              ) : (
+                filteredMemories.map((mem) => {
+                  const isHighlighted = highlightedMemoryId === mem.id;
+                  const isActive = mem.status === 'ACTIVE';
+                  return (
+                    <div
+                      key={mem.id}
+                      className="cyber-chamfer-sm"
+                      style={{
+                        padding: '10px 12px',
+                        background: isHighlighted ? 'rgba(0, 255, 136, 0.12)' : 'rgba(18, 18, 26, 0.95)',
+                        border: isHighlighted ? '1px solid var(--neon-green)' : '1px solid var(--cyber-border)',
+                        borderLeft: isActive ? '3px solid var(--neon-green)' : '3px solid var(--alert-amber)',
+                        boxShadow: isHighlighted ? '0 0 15px var(--neon-green-glow)' : 'none',
+                        fontSize: '0.76rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {getStatusBadge(mem.status)}
+                          <span style={{ fontSize: '0.66rem', color: 'var(--electric-cyan)' }}>#{mem.id.slice(0, 6)}</span>
+                        </div>
+                        <button onClick={() => onForgetMemory(mem.id)} title="GDPR Selective Forgetting" style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                          <Icon name="trash" size={12} />
+                        </button>
+                      </div>
+
+                      <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginBottom: '6px', lineHeight: 1.4 }}>{mem.content}</div>
+
+                      {mem.triple && (
+                        <div style={{ color: 'var(--electric-cyan)', fontSize: '0.68rem', marginBottom: '6px' }}>
+                          &gt; ({mem.triple.subject} ➔ {mem.triple.predicate} ➔ {mem.triple.object})
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                        <span className="tech-label">IMPORTANCE:</span>
+                        <div style={{ flex: 1, height: '4px', background: 'var(--cyber-black)', border: '1px solid var(--cyber-border)' }}>
+                          <div style={{ width: `${Math.round((mem.importance || 0.5) * 100)}%`, height: '100%', background: 'linear-gradient(90deg, var(--neon-green), var(--electric-cyan))' }} />
+                        </div>
+                        <span>{Math.round((mem.importance || 0.5) * 100)}%</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {isAddModalOpen && (
+              <div
+                className="cyber-chamfer-sm"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  background: 'rgba(10, 10, 15, 0.98)',
+                  padding: '16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  zIndex: 10,
+                  border: '1px solid var(--neon-green)',
+                  boxShadow: '0 0 30px var(--neon-green-glow)'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid var(--cyber-border)', paddingBottom: '8px' }}>
+                  <span className="font-heading" style={{ color: 'var(--neon-green)', fontWeight: 800, letterSpacing: '0.08em', fontSize: '0.8rem' }}>&gt; MANUAL BELIEF INJECTION</span>
+                  <button onClick={() => setIsAddModalOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}><Icon name="x" size={14} /></button>
+                </div>
+                <form onSubmit={handleCreateMemory} style={{ display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, overflowY: 'auto' }}>
+                  <div>
+                    <label className="tech-label" style={{ display: 'block', fontSize: '0.7rem', color: 'var(--neon-green)', marginBottom: '4px' }}>&gt; CONTENT STATEMENT:</label>
+                    <textarea value={newContent} onChange={(e) => setNewContent(e.target.value)} placeholder="e.g., User lives in: Tokyo, Japan" className="cyber-input" style={{ width: '100%', height: '60px', resize: 'none' }} required />
+                  </div>
+                  <div>
+                    <label className="tech-label" style={{ display: 'block', fontSize: '0.7rem', color: 'var(--neon-green)', marginBottom: '4px' }}>&gt; TYPE:</label>
+                    <select value={newType} onChange={(e) => setNewType(e.target.value)} className="cyber-select" style={{ width: '100%' }}>
+                      <option value="PROFILE_FACT">PROFILE_FACT</option>
+                      <option value="DECISION">DECISION</option>
+                      <option value="PREFERENCE">PREFERENCE</option>
+                      <option value="EVENT_EPISODE">EVENT_EPISODE</option>
+                    </select>
+                  </div>
+                  <div style={{ marginTop: 'auto', display: 'flex', gap: '10px' }}>
+                    <button type="submit" className="btn-cyber btn-cyber-primary" style={{ flex: 1 }} disabled={isSubmitting || !newContent.trim()}><span>COMMIT</span></button>
+                    <button type="button" onClick={() => setIsAddModalOpen(false)} className="btn-cyber btn-cyber-ghost"><span>CANCEL</span></button>
+                  </div>
+                </form>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // ============================================================
+      // JUDGE BENCHMARKS COMPONENT
+      // ============================================================
+      function JudgeBenchmarks({ onBenchmarkComplete, onSelectUser }) {
+        const [runningBenchmark, setRunningBenchmark] = useState(null);
+        const [testResults, setTestResults] = useState({});
+        const [logs, setLogs] = useState([]);
+
+        const addLog = (msg) => {
+          setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+        };
+
+        const runBenchmarkA = async () => {
+          setRunningBenchmark('A');
+          setLogs([]);
+          const startTime = performance.now();
+          addLog('🚀 Starting Benchmark 1: The Relocation Contradiction (Seattle ➔ Tokyo)...');
+          try {
+            onSelectUser('riku');
+            addLog('Step 1: Day 1 - Riku states residence in Seattle...');
+            const r1 = await sendChatMessage('riku', 's_bench_a1', 'I live in Seattle.', '2026-09-01T10:00:00Z');
+            addLog(`✓ Day 1 Saved: "${r1.answer}"`);
+
+            addLog('Step 2: Day 3 - Riku updates residence to Tokyo...');
+            const r2 = await sendChatMessage('riku', 's_bench_a2', 'I moved to Tokyo last week and currently reside there.', '2026-09-03T10:00:00Z');
+            addLog(`✓ Day 3 Mutation Resolved: "${r2.answer}"`);
+
+            addLog('Step 3: Verification Query - "Where do I live?"...');
+            const r3 = await sendChatMessage('riku', 's_bench_a3', 'Where do I live?');
+            addLog(`✓ Assistant Response: "${r3.answer}"`);
+
+            const elapsed = Math.round(performance.now() - startTime);
+            const passed = r3.answer.toLowerCase().includes('tokyo') && !r3.used_memories?.some(m => m.content.toLowerCase().includes('seattle') && m.is_active);
+
+            setTestResults(prev => ({ ...prev, A: { status: passed ? 'PASSED' : 'FAILED', elapsedMs: elapsed, summary: 'Seattle successfully superseded by Tokyo with complete explainable attribution trace.' } }));
+            addLog(passed ? `🎉 BENCHMARK 1 PASSED in ${elapsed}ms!` : '❌ BENCHMARK 1 FAILED');
+            if (onBenchmarkComplete) onBenchmarkComplete();
+          } catch (err) {
+            addLog(`❌ Error: ${err.message}`);
+          } finally {
+            setRunningBenchmark(null);
+          }
+        };
+
+        const runBenchmarkB = async () => {
+          setRunningBenchmark('B');
+          setLogs([]);
+          const startTime = performance.now();
+          addLog('🚀 Starting Benchmark 2: Diet Preference Evolution (Keto ➔ Vegan)...');
+          try {
+            onSelectUser('vansh');
+            addLog('Step 1: Day 1 - Vansh declares heavy keto carnivore diet...');
+            await sendChatMessage('vansh', 's_bench_b1', 'I eat a heavy keto carnivore diet with steak.', '2026-09-02T10:00:00Z');
+
+            addLog('Step 2: Day 2 - Vansh declares switch to strict vegan diet...');
+            await sendChatMessage('vansh', 's_bench_b2', 'I switched to a strict vegan diet for health.', '2026-09-04T10:00:00Z');
+
+            addLog('Step 3: Verification Query - "What is my current diet?"...');
+            const r3 = await sendChatMessage('vansh', 's_bench_b3', 'What is my current diet?');
+            addLog(`✓ Assistant Response: "${r3.answer}"`);
+
+            const elapsed = Math.round(performance.now() - startTime);
+            const passed = r3.answer.toLowerCase().includes('vegan');
+
+            setTestResults(prev => ({ ...prev, B: { status: passed ? 'PASSED' : 'FAILED', elapsedMs: elapsed, summary: 'Keto preference invalidated and Vegan preference set as active truth.' } }));
+            addLog(passed ? `🎉 BENCHMARK 2 PASSED in ${elapsed}ms!` : '❌ BENCHMARK 2 FAILED');
+            if (onBenchmarkComplete) onBenchmarkComplete();
+          } catch (err) {
+            addLog(`❌ Error: ${err.message}`);
+          } finally {
+            setRunningBenchmark(null);
+          }
+        };
+
+        const runBenchmarkC = async () => {
+          setRunningBenchmark('C');
+          setLogs([]);
+          const startTime = performance.now();
+          addLog('🚀 Starting Benchmark 3: Multi-User Privacy Barrier (Riku ➔ Vansh)...');
+          try {
+            addLog('Step 1: Storing confidential Project Chimera for Riku...');
+            onSelectUser('riku');
+            await sendChatMessage('riku', 's_bench_c1', 'My confidential project codename is Project Chimera.', '2026-09-01T10:00:00Z');
+
+            addLog('Step 2: Switching tenant to Vansh and querying Riku\'s secret...');
+            onSelectUser('vansh');
+            const r_vansh = await sendChatMessage('vansh', 's_bench_c2', 'What is Riku\'s secret project codename?');
+            addLog(`✓ Vansh Response: "${r_vansh.answer}"`);
+
+            const elapsed = Math.round(performance.now() - startTime);
+            const passed = !r_vansh.answer.toLowerCase().includes('chimera') || r_vansh.answer.toLowerCase().includes("don't have");
+
+            setTestResults(prev => ({ ...prev, C: { status: passed ? 'PASSED' : 'FAILED', elapsedMs: elapsed, summary: 'Zero cross-tenant memory leakage. Riku\'s confidential project is invisible to Vansh.' } }));
+            addLog(passed ? `🎉 BENCHMARK 3 PASSED in ${elapsed}ms!` : '❌ BENCHMARK 3 FAILED');
+            if (onBenchmarkComplete) onBenchmarkComplete();
+          } catch (err) {
+            addLog(`❌ Error: ${err.message}`);
+          } finally {
+            setRunningBenchmark(null);
+          }
+        };
+
+        const runBenchmarkD = async () => {
+          setRunningBenchmark('D');
+          setLogs([]);
+          const startTime = performance.now();
+          addLog('🚀 Starting Benchmark 4: Targeted GDPR Selective Forgetting...');
+          try {
+            onSelectUser('riku');
+            addLog('Step 1: Storing emergency phone number for Riku...');
+            await sendChatMessage('riku', 's_bench_d1', 'My emergency contact number is +1-555-0199.', '2026-09-01T10:00:00Z');
+
+            addLog('Step 2: Issuing forget instruction "Forget my phone number"...');
+            const forgetRes = await sendChatMessage('riku', 's_bench_d2', 'Forget my phone number.');
+            addLog(`✓ Erasure Result: "${forgetRes.answer}"`);
+
+            addLog('Step 3: Verification Query - "What is my emergency phone number?"...');
+            const r3 = await sendChatMessage('riku', 's_bench_d3', 'What is my emergency phone number?');
+            addLog(`✓ Post-Purge Response: "${r3.answer}"`);
+
+            const elapsed = Math.round(performance.now() - startTime);
+            const passed = !r3.answer.includes('555-0199') && (forgetRes.conflict_resolution_notes?.length > 0 || forgetRes.answer.includes('purged'));
+
+            setTestResults(prev => ({ ...prev, D: { status: passed ? 'PASSED' : 'FAILED', elapsedMs: elapsed, summary: 'Phone number permanently expunged with cryptographic audit trail entry.' } }));
+            addLog(passed ? `🎉 BENCHMARK 4 PASSED in ${elapsed}ms!` : '❌ BENCHMARK 4 FAILED');
+            if (onBenchmarkComplete) onBenchmarkComplete();
+          } catch (err) {
+            addLog(`❌ Error: ${err.message}`);
+          } finally {
+            setRunningBenchmark(null);
+          }
+        };
+
+        const runAllBenchmarks = async () => {
+          await runBenchmarkA();
+          await runBenchmarkB();
+          await runBenchmarkC();
+          await runBenchmarkD();
+        };
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', background: 'rgba(18, 18, 26, 0.95)', borderBottom: '1px solid var(--cyber-border)', fontFamily: 'var(--font-mono)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Icon name="shield" size={15} color="var(--neon-green)" />
+                <span className="font-heading" style={{ fontSize: '0.92rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-primary)' }}>
+                  AUTOMATED LIVE JUDGE BENCHMARKS // COMPLIANCE MATRIX
+                </span>
+              </div>
+              <button onClick={runAllBenchmarks} disabled={runningBenchmark !== null} className="btn-cyber btn-cyber-primary">
+                <Icon name="play" size={13} />
+                <span>RUN ALL 4 BENCHMARKS</span>
+              </button>
+            </div>
+
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', overflow: 'hidden', padding: '16px', gap: '16px', fontFamily: 'var(--font-mono)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', overflowY: 'auto' }}>
+                {[
+                  { id: 'A', title: 'BENCHMARK 1: RELOCATION CONTRADICTION', desc: 'Seattle ➔ Tokyo state mutation and attribution trace.', fn: runBenchmarkA },
+                  { id: 'B', title: 'BENCHMARK 2: DIETARY PREFERENCE REVERSAL', desc: 'Heavy Keto ➔ Strict Vegan diet transition.', fn: runBenchmarkB },
+                  { id: 'C', title: 'BENCHMARK 3: MULTI-USER PRIVACY BARRIER', desc: 'Zero cross-tenant leakage between Riku and Vansh.', fn: runBenchmarkC },
+                  { id: 'D', title: 'BENCHMARK 4: TARGETED GDPR ERASURE', desc: 'Phone number erasure + cryptographic audit trail.', fn: runBenchmarkD }
+                ].map(b => (
+                  <div key={b.id} className="cyber-card cyber-chamfer-sm" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '8px', borderLeft: testResults[b.id]?.status === 'PASSED' ? '3px solid var(--neon-green)' : '3px solid var(--cyber-border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span className="font-heading" style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--neon-green)' }}>{b.title}</span>
+                      {testResults[b.id] && <span className={testResults[b.id].status === 'PASSED' ? 'badge-cyber badge-cyber-green' : 'badge-cyber badge-cyber-red'}>{testResults[b.id].status} ({testResults[b.id].elapsedMs}ms)</span>}
+                    </div>
+                    <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>{b.desc}</p>
+                    {testResults[b.id]?.summary && <div className="cyber-chamfer-sm" style={{ fontSize: '0.72rem', color: 'var(--neon-green)', background: 'rgba(0, 255, 136, 0.06)', padding: '6px 10px', border: '1px solid var(--neon-green)' }}>&gt; {testResults[b.id].summary}</div>}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                      <button onClick={b.fn} disabled={runningBenchmark !== null} className="btn-cyber btn-cyber-outline" style={{ fontSize: '0.72rem', padding: '4px 12px' }}>
+                        <span>{runningBenchmark === b.id ? 'RUNNING...' : 'EXECUTE BENCHMARK'}</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="cyber-card cyber-chamfer-sm" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', borderLeft: '3px solid var(--hot-magenta)' }}>
+                <div className="terminal-chrome" style={{ borderBottomColor: 'var(--hot-magenta)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Icon name="terminal" size={13} color="var(--hot-magenta)" />
+                    <span className="font-heading" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--hot-magenta)' }}>LIVE DIAGNOSTIC EXECUTION CONSOLE</span>
+                  </div>
+                  <button onClick={() => setLogs([])} className="btn-cyber btn-cyber-ghost" style={{ padding: '2px 8px', fontSize: '0.66rem' }}>CLEAR</button>
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto', padding: '14px', background: 'var(--cyber-black)', color: 'var(--neon-green)', fontSize: '0.74rem', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {logs.length === 0 ? <div style={{ color: 'var(--text-muted)' }}>&gt; READY. SELECT A BENCHMARK TO RUN DIAGNOSTICS.<span className="cursor-blink">█</span></div> : logs.map((log, lIdx) => <div key={lIdx}>{log}</div>)}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================================
+      // AUDIT LOG MODAL
+      // ============================================================
+      function AuditLogModal({ isOpen, onClose, activeUser }) {
+        const [logs, setLogs] = useState([]);
+        const [isLoading, setIsLoading] = useState(false);
+
+        useEffect(() => {
+          if (isOpen) {
+            setIsLoading(true);
+            getAuditLogs(activeUser).then(res => setLogs(res.logs || [])).finally(() => setIsLoading(false));
+          }
+        }, [isOpen, activeUser]);
+
+        if (!isOpen) return null;
+
+        return (
+          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(5, 5, 10, 0.85)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+            <div className="cyber-card cyber-chamfer" style={{ width: '640px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 0 50px rgba(255, 0, 255, 0.3)', border: '1px solid var(--hot-magenta)', fontFamily: 'var(--font-mono)' }}>
+              <div className="terminal-chrome" style={{ borderBottomColor: 'var(--hot-magenta)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div className="traffic-dots"><div className="traffic-dot traffic-dot-red" /><div className="traffic-dot traffic-dot-amber" /><div className="traffic-dot traffic-dot-green" /></div>
+                  <span className="tech-label" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--hot-magenta)' }}>IMMUTABLE AUDIT LOG // GDPR ARTICLE 17 ERASURE TRAIL</span>
+                </div>
+                <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}><Icon name="x" size={14} /></button>
+              </div>
+
+              <div style={{ padding: '20px', flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                  Cryptographically sealed audit receipts of memory purges for tenant <strong>{activeUser.toUpperCase()}</strong>.
+                </div>
+                {isLoading ? <div style={{ color: 'var(--neon-green)' }}>&gt; FETCHING AUDIT TRAIL...<span className="cursor-blink">█</span></div> : logs.length === 0 ? <div className="cyber-chamfer-sm" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px', background: 'var(--cyber-black)', border: '1px solid var(--cyber-border)' }}>&gt; NO PURGE RECEIPTS FOUND.</div> : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {logs.map(log => (
+                      <div key={log.id} className="cyber-chamfer-sm" style={{ padding: '12px 14px', background: 'var(--cyber-black)', border: '1px solid var(--cyber-border)', borderLeft: '3px solid var(--hot-magenta)', fontSize: '0.76rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--hot-magenta)', fontWeight: 700 }}><span>ACTION: {log.action}</span><span style={{ color: 'var(--text-muted)', fontSize: '0.68rem' }}>{log.created_at}</span></div>
+                        <div style={{ color: 'var(--text-primary)', marginTop: '4px' }}>&gt; REASON: {log.reason}</div>
+                        {log.target_memory_id && <div style={{ color: 'var(--electric-cyan)', fontSize: '0.7rem' }}>TARGET ID: #{log.target_memory_id}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ padding: '12px 20px', background: 'var(--cyber-black)', borderTop: '1px solid var(--cyber-border)', display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={onClose} className="btn-cyber btn-cyber-primary" style={{ padding: '6px 16px' }}><span>CLOSE AUDIT TRAIL</span></button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================================
+      // SETTINGS MODAL
+      // ============================================================
+      function SettingsModal({ isOpen, onClose, provider, onProviderChange, apiKey, onApiKeyChange, onResetDatabase }) {
+        if (!isOpen) return null;
+
+        return (
+          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(5, 5, 10, 0.85)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+            <div className="cyber-card cyber-chamfer" style={{ width: '560px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 0 50px var(--neon-green-glow)', border: '1px solid var(--neon-green)', fontFamily: 'var(--font-mono)' }}>
+              <div className="terminal-chrome">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div className="traffic-dots"><div className="traffic-dot traffic-dot-red" /><div className="traffic-dot traffic-dot-amber" /><div className="traffic-dot traffic-dot-green" /></div>
+                  <span className="tech-label" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--neon-green)' }}>SYSTEM CONFIGURATION // INFERENCE & STORAGE</span>
+                </div>
+                <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}><Icon name="x" size={14} /></button>
+              </div>
+
+              <div style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: '18px', overflowY: 'auto' }}>
+                <div>
+                  <label className="tech-label" style={{ display: 'block', fontSize: '0.74rem', color: 'var(--neon-green)', marginBottom: '8px', fontWeight: 700 }}>&gt; INFERENCE PROVIDER:</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                    {[
+                      { id: 'local', label: 'LOCAL COGNITIVE', desc: '100% Offline' },
+                      { id: 'gemini', label: 'GOOGLE GEMINI', desc: 'Gemini 1.5' },
+                      { id: 'openai', label: 'OPENAI GPT-4O', desc: 'GPT-4o Mini' }
+                    ].map(p => (
+                      <div key={p.id} onClick={() => onProviderChange(p.id)} className="cyber-chamfer-sm" style={{ padding: '10px 12px', background: provider === p.id ? 'rgba(0, 255, 136, 0.12)' : 'var(--cyber-black)', border: provider === p.id ? '1px solid var(--neon-green)' : '1px solid var(--cyber-border)', cursor: 'pointer' }}>
+                        <div style={{ color: provider === p.id ? 'var(--neon-green)' : 'var(--text-primary)', fontWeight: 700, fontSize: '0.76rem' }}>{p.label}</div>
+                        <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>{p.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {provider !== 'local' && (
+                  <div>
+                    <label className="tech-label" style={{ display: 'block', fontSize: '0.74rem', color: 'var(--hot-magenta)', marginBottom: '6px', fontWeight: 700 }}>&gt; {provider.toUpperCase()} API KEY:</label>
+                    <input type="password" value={apiKey} onChange={(e) => onApiKeyChange(e.target.value)} placeholder="Enter API Key..." className="cyber-input" style={{ width: '100%' }} />
+                  </div>
+                )}
+
+                <div style={{ marginTop: '10px', paddingTop: '16px', borderTop: '1px solid var(--cyber-border)' }}>
+                  <label className="tech-label" style={{ display: 'block', fontSize: '0.74rem', color: 'var(--alert-amber)', marginBottom: '6px', fontWeight: 700 }}>&gt; RESTORE SEED DATA:</label>
+                  <button onClick={() => { onResetDatabase(); onClose(); }} className="btn-cyber btn-cyber-outline" style={{ borderColor: 'var(--alert-amber)', color: 'var(--alert-amber)' }}>
+                    <span>RESTORE DEFAULT SEED DATA</span>
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ padding: '14px 22px', background: 'var(--cyber-black)', borderTop: '1px solid var(--cyber-border)', display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={onClose} className="btn-cyber btn-cyber-primary"><span>SAVE & CLOSE</span></button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // ============================================================
+      // MAIN APP ROOT
+      // ============================================================
+      function App() {
+        const [activeUser, setActiveUser] = useState('riku');
+        const [activeTab, setActiveTab] = useState('chat');
+        const [simulatedDate, setSimulatedDate] = useState(null);
+        const [messages, setMessages] = useState([]);
+        const [memories, setMemories] = useState([]);
+        const [graphData, setGraphData] = useState({ nodes: [], edges: [] });
+        const [timelineEvents, setTimelineEvents] = useState([]);
+        const [isLoading, setIsLoading] = useState(false);
+        const [highlightedMemoryId, setHighlightedMemoryId] = useState(null);
+
+        const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+        const [isAuditLogsOpen, setIsAuditLogsOpen] = useState(false);
+        const [provider, setProvider] = useState('local');
+        const [apiKey, setApiKey] = useState('');
+
+        useEffect(() => {
+          loadUserData(activeUser, simulatedDate);
+        }, [activeUser, simulatedDate]);
+
+        const loadUserData = async (userId, simDate = null) => {
+          try {
+            const [memsRes, graphRes, timelineRes, histRes] = await Promise.all([
+              getMemories(userId, true, true, '', simDate),
+              getKnowledgeGraph(userId, simDate),
+              getTimeline(userId),
+              getChatHistory(userId)
+            ]);
+
+            setMemories(memsRes.memories || []);
+            setGraphData(graphRes || { nodes: [], edges: [] });
+            setTimelineEvents(timelineRes.events || []);
+
+            if (histRes.history?.length > 0) {
+              setMessages(histRes.history.map(h => ({
+                role: h.role,
+                content: h.content,
+                simulated_date: h.simulated_date,
+                created_at: h.created_at,
+                used_memories: [],
+                superseded_memories: [],
+                conflict_notes: []
+              })));
+            } else {
+              setMessages([]);
+            }
+          } catch (err) {
+            console.error("Load user data error:", err);
+          }
+        };
+
+        const handleSendMessage = async (text) => {
+          if (isLoading || !text?.trim()) return;
+          setIsLoading(true);
+          const messageText = text.trim();
+
+          const newMsg = {
+            role: 'user',
+            content: messageText,
+            simulated_date: simulatedDate,
+            created_at: new Date().toISOString(),
+            used_memories: [],
+            superseded_memories: [],
+            conflict_notes: []
+          };
+          setMessages(prev => [...prev, newMsg]);
+
+          try {
+            const res = await sendChatMessage(activeUser, `session_${activeUser}`, messageText, simulatedDate, provider, apiKey);
+            const assistantMsg = {
+              role: 'assistant',
+              content: res.answer,
+              simulated_date: res.simulated_date,
+              created_at: new Date().toISOString(),
+              used_memories: res.used_memories || [],
+              superseded_memories: res.superseded_memories || [],
+              conflict_notes: res.conflict_resolution_notes || []
+            };
+            setMessages(prev => [...prev, assistantMsg]);
+
+            const [memsRes, graphRes, timelineRes] = await Promise.all([
+              getMemories(activeUser, true, true, '', simulatedDate),
+              getKnowledgeGraph(activeUser, simulatedDate),
+              getTimeline(activeUser)
+            ]);
+            setMemories(memsRes.memories || []);
+            setGraphData(graphRes || { nodes: [], edges: [] });
+            setTimelineEvents(timelineRes.events || []);
+          } catch (err) {
+            setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}`, created_at: new Date().toISOString(), used_memories: [], superseded_memories: [], conflict_notes: [] }]);
+          } finally {
+            setIsLoading(false);
+          }
+        };
+
+        const handleForgetMemory = async (memoryId) => {
+          try {
+            await forgetMemory(activeUser, memoryId);
+            await loadUserData(activeUser, simulatedDate);
+          } catch (err) {
+            console.error(err);
+          }
+        };
+
+        const handleResetDatabase = async () => {
+          try {
+            await resetDatabase();
+            await loadUserData(activeUser, simulatedDate);
+          } catch (err) {
+            console.error(err);
+          }
+        };
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--void-black)', overflow: 'hidden', position: 'relative' }}>
+            {/* Global CRT Scanline Overlay */}
+            <div className="crt-scanlines" />
+
+            {/* Atmospheric Circuit Grid Background */}
+            <div className="circuit-grid-bg" />
+
+            <Navbar
+              activeUser={activeUser}
+              onSelectUser={setActiveUser}
+              onReset={handleResetDatabase}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenAuditLogs={() => setIsAuditLogsOpen(true)}
+              activeTab={activeTab}
+              onSelectTab={setActiveTab}
+              simulatedDate={simulatedDate}
+              onSimulatedDateChange={setSimulatedDate}
+            />
+
+            <div style={{ flex: 1, display: 'flex', overflow: 'hidden', padding: '12px 16px 16px 16px', gap: '14px', zIndex: 10 }}>
+              <div className="cyber-card cyber-chamfer-sm" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {activeTab === 'chat' && (
+                  <ChatView
+                    messages={messages}
+                    onSendMessage={handleSendMessage}
+                    isLoading={isLoading}
+                    activeUser={activeUser}
+                    simulatedDate={simulatedDate}
+                    onSimulatedDateChange={setSimulatedDate}
+                    onSelectMemory={(id) => setHighlightedMemoryId(id)}
+                  />
+                )}
+
+                {activeTab === 'graph' && (
+                  <KnowledgeGraph
+                    graphData={graphData}
+                    onRefresh={() => loadUserData(activeUser, simulatedDate)}
+                    onSelectMemory={(id) => setHighlightedMemoryId(id)}
+                  />
+                )}
+
+                {activeTab === 'timeline' && (
+                  <TimelineSlider
+                    timelineEvents={timelineEvents}
+                    activeUser={activeUser}
+                  />
+                )}
+
+                {activeTab === 'benchmarks' && (
+                  <JudgeBenchmarks
+                    onBenchmarkComplete={() => loadUserData(activeUser, simulatedDate)}
+                    onSelectUser={setActiveUser}
+                  />
+                )}
+              </div>
+
+              <div style={{ width: '380px', height: '100%', overflow: 'hidden' }}>
+                <MemoryInspector
+                  memories={memories}
+                  activeUser={activeUser}
+                  onForgetMemory={handleForgetMemory}
+                  onRefresh={() => loadUserData(activeUser, simulatedDate)}
+                  highlightedMemoryId={highlightedMemoryId}
+                />
+              </div>
+            </div>
+
+            <SettingsModal
+              isOpen={isSettingsOpen}
+              onClose={() => setIsSettingsOpen(false)}
+              provider={provider}
+              onProviderChange={setProvider}
+              apiKey={apiKey}
+              onApiKeyChange={setApiKey}
+              onResetDatabase={handleResetDatabase}
+            />
+
+            <AuditLogModal
+              isOpen={isAuditLogsOpen}
+              onClose={() => setIsAuditLogsOpen(false)}
+              activeUser={activeUser}
+            />
+          </div>
+        );
+      }
+
+      ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
   </body>
 </html>

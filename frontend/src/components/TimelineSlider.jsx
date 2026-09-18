@@ -1,115 +1,171 @@
 import React, { useState } from 'react';
-import { Clock, ArrowRight, CheckCircle, AlertTriangle, ShieldCheck, Play } from 'lucide-react';
+import { Clock, Calendar, ArrowRight, CheckCircle, AlertTriangle, Layers, Zap, Cpu } from 'lucide-react';
 
 export default function TimelineSlider({ timelineEvents, activeUser }) {
-  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [selectedEventId, setSelectedEventId] = useState(null);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '16px 20px', overflowY: 'auto' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-          <Clock size={18} color="#06b6d4" />
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 700 }}>Temporal Lineage & Truth Evolution</h3>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+      {/* Top Header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 18px',
+          background: 'rgba(18, 18, 26, 0.95)',
+          borderBottom: '1px solid var(--cyber-border)',
+          fontFamily: 'var(--font-mono)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Clock size={15} color="var(--neon-green)" />
+          <span className="font-heading" style={{ fontSize: '0.92rem', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--text-primary)' }}>
+            TEMPORAL MUTATION HIGHWAY // BELIEF EVOLUTION
+          </span>
         </div>
-        <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-          Trace every state transition, mutation, and contradiction for <strong>{activeUser.toUpperCase()}</strong> in chronological order.
-        </p>
+        <div>
+          <span className="badge-cyber badge-cyber-magenta">
+            {timelineEvents?.length || 0} TOTAL STATE MUTATIONS
+          </span>
+        </div>
       </div>
 
-      {/* Timeline Stream */}
-      <div style={{ position: 'relative', paddingLeft: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {/* Vertical Axis Line */}
-        <div style={{
-          position: 'absolute', left: '10px', top: '10px', bottom: '10px', width: '2px',
-          background: 'linear-gradient(to bottom, #06b6d4, #6366f1, #10b981)'
-        }} />
+      {/* Main Timeline Scrollable Content */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '24px 20px',
+          position: 'relative'
+        }}
+      >
+        {(!timelineEvents || timelineEvents.length === 0) ? (
+          <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '40px', fontFamily: 'var(--font-mono)' }}>
+            &gt; NO TEMPORAL STATE MUTATIONS RECORDED YET FOR {activeUser.toUpperCase()}.
+          </div>
+        ) : (
+          <div style={{ position: 'relative', maxWidth: '800px', margin: '0 auto' }}>
+            {/* Central Laser Checkpoint Line */}
+            <div
+              style={{
+                position: 'absolute',
+                top: '0',
+                bottom: '0',
+                left: '28px',
+                width: '2px',
+                background: 'linear-gradient(180deg, var(--neon-green) 0%, var(--hot-magenta) 50%, var(--electric-cyan) 100%)',
+                boxShadow: '0 0 10px var(--neon-green-glow)'
+              }}
+            />
 
-        {timelineEvents.length === 0 && (
-          <div style={{ color: 'var(--text-muted)', fontSize: '0.82rem', padding: '20px 0' }}>
-            No timeline events recorded for this user.
+            {/* Timeline Event Cards */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {timelineEvents.map((evt, idx) => {
+                const isActive = evt.status === 'ACTIVE';
+                const isSuperseded = evt.status === 'SUPERSEDED';
+
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '18px',
+                      position: 'relative'
+                    }}
+                  >
+                    {/* Glowing Checkpoint Node */}
+                    <div
+                      className="cyber-chamfer-sm"
+                      style={{
+                        width: '22px',
+                        height: '22px',
+                        background: isActive ? 'var(--neon-green)' : 'var(--alert-amber)',
+                        boxShadow: isActive ? '0 0 12px var(--neon-green-glow)' : '0 0 12px rgba(255, 170, 0, 0.4)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 2,
+                        marginTop: '12px'
+                      }}
+                    >
+                      <div style={{ width: '6px', height: '6px', background: 'var(--cyber-black)' }} />
+                    </div>
+
+                    {/* Event Detail Box */}
+                    <div
+                      className="cyber-card cyber-chamfer-sm"
+                      style={{
+                        flex: 1,
+                        padding: '14px 18px',
+                        fontFamily: 'var(--font-mono)',
+                        borderLeft: isActive ? '3px solid var(--neon-green)' : '3px solid var(--alert-amber)',
+                        boxShadow: isActive ? '0 0 15px rgba(0, 255, 136, 0.1)' : '0 0 15px rgba(255, 170, 0, 0.1)'
+                      }}
+                    >
+                      {/* Header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className={isActive ? 'badge-cyber badge-cyber-green' : 'badge-cyber badge-cyber-amber'}>
+                            {evt.status}
+                          </span>
+                          <span className="tech-label" style={{ fontSize: '0.7rem', color: 'var(--electric-cyan)', fontWeight: 700 }}>
+                            {evt.memory_type}
+                          </span>
+                        </div>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                          RECORDED: {evt.created_at?.slice(0, 10) || 'UNKNOWN'}
+                        </span>
+                      </div>
+
+                      {/* Content */}
+                      <div style={{ fontSize: '0.88rem', color: 'var(--text-primary)', fontWeight: 600, marginBottom: '8px' }}>
+                        {evt.content}
+                      </div>
+
+                      {/* Validity Window */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                        <div>
+                          <span style={{ color: 'var(--text-muted)' }}>VALID FROM: </span>
+                          <strong style={{ color: 'var(--neon-green)' }}>{evt.valid_from ? evt.valid_from.slice(0, 10) : 'PRESENT'}</strong>
+                        </div>
+                        {evt.valid_to && (
+                          <div>
+                            <span style={{ color: 'var(--text-muted)' }}>VALID TO: </span>
+                            <strong style={{ color: 'var(--alert-amber)' }}>{evt.valid_to.slice(0, 10)}</strong>
+                          </div>
+                        )}
+                        {evt.superseded_by_id && (
+                          <div>
+                            <span style={{ color: 'var(--text-muted)' }}>SUPERSEDED BY: </span>
+                            <span style={{ color: 'var(--hot-magenta)' }}>#{evt.superseded_by_id.slice(0, 8)}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Supersede Reason */}
+                      {evt.supersede_reason && (
+                        <div
+                          style={{
+                            marginTop: '8px',
+                            padding: '6px 10px',
+                            background: 'rgba(255, 170, 0, 0.08)',
+                            border: '1px solid var(--alert-amber)',
+                            fontSize: '0.7rem',
+                            color: '#FFE0B2'
+                          }}
+                        >
+                          &gt; CAUSAL OVERRIDE: {evt.supersede_reason}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
-
-        {timelineEvents.map((evt, idx) => {
-          const isActive = evt.status === 'ACTIVE';
-          const isSuperseded = evt.status === 'SUPERSEDED';
-          const isForgotten = evt.status === 'FORGOTTEN';
-
-          const dotColor = isActive ? '#10b981' : (isSuperseded ? '#f59e0b' : '#f43f5e');
-
-          return (
-            <div key={evt.id || idx} style={{ position: 'relative' }}>
-              {/* Pulsing Node Marker */}
-              <div
-                style={{
-                  position: 'absolute', left: '-23px', top: '14px', width: '12px', height: '12px',
-                  borderRadius: '50%', background: dotColor,
-                  border: '2px solid var(--bg-primary)',
-                  boxShadow: `0 0 10px ${dotColor}`
-                }}
-              />
-
-              {/* Event Card */}
-              <div
-                className="glass-panel"
-                style={{
-                  padding: '12px 16px',
-                  borderRadius: '10px',
-                  border: isActive ? '1px solid rgba(16, 185, 129, 0.4)' : (isSuperseded ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid var(--border-subtle)'),
-                  background: isActive ? 'rgba(16, 185, 129, 0.05)' : 'rgba(22, 29, 46, 0.65)'
-                }}
-              >
-                {/* Date & Status */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontFamily: 'var(--font-mono)' }}>
-                    {evt.valid_from ? evt.valid_from.slice(0, 19).replace('T', ' ') : 'Session Initial'}
-                  </span>
-                  <span
-                    className={isActive ? 'badge-active' : (isSuperseded ? 'badge-superseded' : 'badge-forgotten')}
-                    style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '0.68rem', fontWeight: 700 }}
-                  >
-                    {evt.status}
-                  </span>
-                </div>
-
-                {/* Content */}
-                <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#f8fafc', marginBottom: '6px' }}>
-                  {evt.content}
-                </div>
-
-                {/* Triple representation */}
-                {evt.triple && (
-                  <div style={{
-                    fontSize: '0.72rem', fontFamily: 'var(--font-mono)', color: '#38bdf8',
-                    background: 'rgba(0, 0, 0, 0.35)', padding: '4px 8px', borderRadius: '4px',
-                    display: 'inline-block', marginBottom: '6px'
-                  }}>
-                    {evt.triple.subject} ➔ {evt.triple.predicate} ➔ {evt.triple.object}
-                  </div>
-                )}
-
-                {/* Supersede / Mutation explanation */}
-                {isSuperseded && evt.supersede_reason && (
-                  <div style={{
-                    marginTop: '6px', padding: '6px 10px', borderRadius: '6px',
-                    background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)',
-                    color: '#fbbf24', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px'
-                  }}>
-                    <AlertTriangle size={14} />
-                    <span><strong>Superseded:</strong> {evt.supersede_reason}</span>
-                  </div>
-                )}
-
-                {/* Validity interval */}
-                <div style={{ marginTop: '8px', fontSize: '0.68rem', color: 'var(--text-muted)', display: 'flex', gap: '14px' }}>
-                  <span>Valid Interval: {evt.valid_from ? evt.valid_from.slice(0, 10) : 'Start'} ➔ {evt.valid_to ? evt.valid_to.slice(0, 10) : 'Present'}</span>
-                  <span>Type: {evt.memory_type}</span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
       </div>
     </div>
   );

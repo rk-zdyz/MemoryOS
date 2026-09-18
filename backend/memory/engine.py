@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
@@ -19,9 +20,7 @@ from backend.memory.extractor import MemoryExtractor
 from backend.memory.conflict_resolver import ConflictResolver
 from backend.memory.decay import MemoryDecayManager
 
-
 class ChronosMemoryEngine:
-
     def __init__(self, db_path: Optional[str] = None):
         self.store = MemoryStore(db_path=db_path) if db_path else MemoryStore()
         self.extractor = MemoryExtractor()
@@ -33,31 +32,24 @@ class ChronosMemoryEngine:
     # ============================================================
 
     def process_chat(self, req: ChatRequest) -> ChatResponse:
-
+        start_time = time.perf_counter()
         user_id = req.user_id
         session_id = req.session_id
         message = req.message
         sim_date = req.simulated_date
 
         # --------------------------------------------------------
-        # 1. Explicit forget / delete / purge command
+        # 1. Explicit forget / GDPR purge command
         # --------------------------------------------------------
-
         forget_target = self.extractor.detect_forget_request(message)
-
         if forget_target:
-            return self._handle_forget_command(
-                user_id,
-                session_id,
-                message,
-                forget_target,
-                sim_date
-            )
+            resp = self._handle_forget_command(user_id, session_id, message, forget_target, sim_date)
+            resp.latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            return resp
 
         # --------------------------------------------------------
-        # 2. Extract new memories
+        # 2. Extract new memories from statement
         # --------------------------------------------------------
-
         new_extracted = self.extractor.extract_memories(
             text=message,
             user_id=user_id,
@@ -65,53 +57,38 @@ class ChronosMemoryEngine:
             simulated_date=sim_date
         )
 
-        conflict_notes = []
-
+        conflict_notes: List[str] = []
         for mem in new_extracted:
-
             # Save new memory
             self.store.save_memory(mem)
-
-            # Resolve contradictions
-            resolutions = (
-                self.resolver.resolve_conflicts_for_new_memory(
-                    mem,
-                    simulated_date=sim_date
-                )
-            )
-
+            # Resolve contradictions and link superseded states
+            resolutions = self.resolver.resolve_conflicts_for_new_memory(mem, simulated_date=sim_date)
             for res in resolutions:
-
                 if res.get("reason"):
                     conflict_notes.append(res["reason"])
 
         # --------------------------------------------------------
-        # 3. Lifecycle / decay pass
+        # 3. Memory lifecycle & decay pass
         # --------------------------------------------------------
-
-        self.decay_manager.run_lifecycle_pass(
-            user_id,
-            simulated_current_date=sim_date
-        )
+        self.decay_manager.run_lifecycle_pass(user_id, simulated_current_date=sim_date)
 
         # --------------------------------------------------------
-        # 4. Retrieve memories
+        # 4. Hybrid memory retrieval with attribution
         # --------------------------------------------------------
-
         search_res = self.retrieve_with_attribution(
             user_id=user_id,
             query=message,
-            top_k=6
+            top_k=6,
+            simulated_date=sim_date
         )
 
-        # Touch active memories
+        # Touch active retrieved memories to reinforce retention
         for mem in search_res.active_memories:
             self.store.touch_memory(mem.id)
 
         # --------------------------------------------------------
-        # 5. Generate answer
+        # 5. Cognitive answer synthesis
         # --------------------------------------------------------
-
         answer = self._synthesize_answer(
             query=message,
             search_result=search_res,
@@ -124,13 +101,7 @@ class ChronosMemoryEngine:
         # --------------------------------------------------------
         # 6. Save conversation history
         # --------------------------------------------------------
-
-        used_ids = [
-            a.memory_id
-            for a in search_res.attributions
-            if a.is_active
-        ]
-
+        used_ids = [a.memory_id for a in search_res.attributions if a.is_active]
         self.store.save_chat_message(
             user_id=user_id,
             session_id=session_id,
@@ -138,7 +109,6 @@ class ChronosMemoryEngine:
             content=message,
             simulated_date=sim_date
         )
-
         self.store.save_chat_message(
             user_id=user_id,
             session_id=session_id,
@@ -149,18 +119,12 @@ class ChronosMemoryEngine:
         )
 
         # --------------------------------------------------------
-        # 7. Return structured response
+        # 7. Formulate structured response
         # --------------------------------------------------------
+        active_attributions = [a for a in search_res.attributions if a.is_active]
+        superseded_attributions = [a for a in search_res.attributions if not a.is_active]
 
-        active_attributions = [
-            a for a in search_res.attributions
-            if a.is_active
-        ]
-
-        superseded_attributions = [
-            a for a in search_res.attributions
-            if not a.is_active
-        ]
+        latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
         return ChatResponse(
             answer=answer,
@@ -170,32 +134,32 @@ class ChronosMemoryEngine:
             superseded_memories=superseded_attributions,
             conflict_resolution_notes=conflict_notes,
             new_memories_extracted=new_extracted,
-            simulated_date=sim_date
+            simulated_date=sim_date,
+            latency_ms=latency_ms
         )
 
     # ============================================================
-    # MEMORY RETRIEVAL + ATTRIBUTION
+    # MEMORY RETRIEVAL & ATTRIBUTION TRACE
     # ============================================================
 
     def retrieve_with_attribution(
         self,
         user_id: str,
         query: str,
-        top_k: int = 6
+        top_k: int = 6,
+        simulated_date: Optional[str] = None
     ) -> MemorySearchResult:
-
         """
-        Retrieves candidate memories using semantic vector search.
-
-        Vector similarity finds candidates, while memory status
-        determines whether they are current or historical.
+        Retrieves relevant candidate memories using hybrid semantic search.
+        Separates active truth from superseded historical lineage and provides
+        a 100% transparent attribution trace.
         """
-
         scored_candidates = self.store.vector_search(
             user_id=user_id,
             query=query,
             top_k=top_k * 2,
-            min_similarity=0.15
+            min_similarity=0.15,
+            simulated_date=simulated_date
         )
 
         active_list: List[MemoryEntry] = []
@@ -203,210 +167,118 @@ class ChronosMemoryEngine:
         decayed_list: List[MemoryEntry] = []
         all_retrieved: List[MemoryEntry] = []
         attributions: List[MemoryAttribution] = []
-
         seen_ids = set()
 
         for mem, score in scored_candidates:
-
-            if (
-                mem.id in seen_ids
-                or mem.status == MemoryStatus.FORGOTTEN
-            ):
+            if mem.id in seen_ids or mem.status == MemoryStatus.FORGOTTEN:
                 continue
 
             seen_ids.add(mem.id)
             all_retrieved.append(mem)
 
-            valid_interval = (
-                f"From: "
-                f"{mem.valid_from[:10] if mem.valid_from else 'Unknown'}"
-            )
-
+            valid_interval = f"From: {mem.valid_from[:10] if mem.valid_from else 'Unknown'}"
             if mem.valid_to:
-                valid_interval += (
-                    f" -> To: {mem.valid_to[:10]}"
-                )
+                valid_interval += f" ➔ To: {mem.valid_to[:10]}"
             else:
-                valid_interval += " -> Present"
+                valid_interval += " ➔ Present"
 
             triple_str = None
-
             if mem.triple:
-
-                triple_str = (
-                    f"({mem.triple.subject} -> "
-                    f"{mem.triple.predicate} -> "
-                    f"{mem.triple.object})"
-                )
-
-            # ----------------------------------------------------
-            # ACTIVE
-            # ----------------------------------------------------
+                triple_str = f"({mem.triple.subject} ➔ {mem.triple.predicate} ➔ {mem.triple.object})"
 
             if mem.status == MemoryStatus.ACTIVE:
-
                 active_list.append(mem)
-
-                attributions.append(
-                    MemoryAttribution(
-                        memory_id=mem.id,
-                        content=mem.content,
-                        memory_type=mem.memory_type,
-                        status=mem.status,
-                        similarity_score=round(score, 3),
-                        confidence=mem.confidence,
-                        is_active=True,
-                        filter_reason=None,
-                        valid_interval=valid_interval,
-                        created_at=mem.created_at,
-                        triple_repr=triple_str
-                    )
-                )
-
-            # ----------------------------------------------------
-            # SUPERSEDED
-            # ----------------------------------------------------
-
+                attributions.append(MemoryAttribution(
+                    memory_id=mem.id,
+                    content=mem.content,
+                    memory_type=mem.memory_type,
+                    status=mem.status,
+                    similarity_score=round(score, 3),
+                    confidence=mem.confidence,
+                    is_active=True,
+                    filter_reason=None,
+                    valid_interval=valid_interval,
+                    created_at=mem.created_at,
+                    triple_repr=triple_str
+                ))
             elif mem.status == MemoryStatus.SUPERSEDED:
-
                 superseded_list.append(mem)
-
-                attributions.append(
-                    MemoryAttribution(
-                        memory_id=mem.id,
-                        content=mem.content,
-                        memory_type=mem.memory_type,
-                        status=mem.status,
-                        similarity_score=round(score, 3),
-                        confidence=mem.confidence,
-                        is_active=False,
-                        filter_reason=(
-                            "SUPERSEDED: "
-                            f"{mem.supersede_reason or 'Replaced by newer update'}"
-                        ),
-                        valid_interval=valid_interval,
-                        created_at=mem.created_at,
-                        triple_repr=triple_str
-                    )
-                )
-
-            # ----------------------------------------------------
-            # DECAYED
-            # ----------------------------------------------------
-
+                attributions.append(MemoryAttribution(
+                    memory_id=mem.id,
+                    content=mem.content,
+                    memory_type=mem.memory_type,
+                    status=mem.status,
+                    similarity_score=round(score, 3),
+                    confidence=mem.confidence,
+                    is_active=False,
+                    filter_reason=f"SUPERSEDED: {mem.supersede_reason or 'Replaced by newer state'}",
+                    valid_interval=valid_interval,
+                    created_at=mem.created_at,
+                    triple_repr=triple_str
+                ))
             elif mem.status == MemoryStatus.DECAYED:
-
                 decayed_list.append(mem)
-
-                attributions.append(
-                    MemoryAttribution(
-                        memory_id=mem.id,
-                        content=mem.content,
-                        memory_type=mem.memory_type,
-                        status=mem.status,
-                        similarity_score=round(score, 3),
-                        confidence=mem.confidence,
-                        is_active=False,
-                        filter_reason=(
-                            "DECAYED: Relevance decayed over time "
-                            "due to inactivity"
-                        ),
-                        valid_interval=valid_interval,
-                        created_at=mem.created_at,
-                        triple_repr=triple_str
-                    )
-                )
-
-            # ----------------------------------------------------
-            # EXPIRED
-            # ----------------------------------------------------
-
+                attributions.append(MemoryAttribution(
+                    memory_id=mem.id,
+                    content=mem.content,
+                    memory_type=mem.memory_type,
+                    status=mem.status,
+                    similarity_score=round(score, 3),
+                    confidence=mem.confidence,
+                    is_active=False,
+                    filter_reason="DECAYED: Relevance diminished due to inactivity",
+                    valid_interval=valid_interval,
+                    created_at=mem.created_at,
+                    triple_repr=triple_str
+                ))
             elif mem.status == MemoryStatus.EXPIRED:
+                attributions.append(MemoryAttribution(
+                    memory_id=mem.id,
+                    content=mem.content,
+                    memory_type=mem.memory_type,
+                    status=mem.status,
+                    similarity_score=round(score, 3),
+                    confidence=mem.confidence,
+                    is_active=False,
+                    filter_reason="EXPIRED: Time-bound schedule/event has elapsed",
+                    valid_interval=valid_interval,
+                    created_at=mem.created_at,
+                    triple_repr=triple_str
+                ))
 
-                attributions.append(
-                    MemoryAttribution(
-                        memory_id=mem.id,
-                        content=mem.content,
-                        memory_type=mem.memory_type,
-                        status=mem.status,
-                        similarity_score=round(score, 3),
-                        confidence=mem.confidence,
-                        is_active=False,
-                        filter_reason=(
-                            "EXPIRED: Time-bound schedule/event "
-                            "has passed"
-                        ),
-                        valid_interval=valid_interval,
-                        created_at=mem.created_at,
-                        triple_repr=triple_str
-                    )
-                )
-
-        # --------------------------------------------------------
-        # Include historical predecessors of active memories
-        # --------------------------------------------------------
-
+        # Include historical predecessors for active memories to ensure explainability
         for act_mem in list(active_list):
-
             if not act_mem.triple:
                 continue
-
             related = self.store.find_memories_by_triple(
                 user_id=user_id,
                 subject=act_mem.triple.subject,
                 predicate=act_mem.triple.predicate
             )
-
             for rel in related:
-
-                if (
-                    rel.id not in seen_ids
-                    and rel.status == MemoryStatus.SUPERSEDED
-                ):
-
+                if rel.id not in seen_ids and rel.status == MemoryStatus.SUPERSEDED:
                     seen_ids.add(rel.id)
                     superseded_list.append(rel)
-
-                    valid_interval = (
-                        f"From: "
-                        f"{rel.valid_from[:10] if rel.valid_from else 'Unknown'}"
-                    )
-
+                    valid_interval = f"From: {rel.valid_from[:10] if rel.valid_from else 'Unknown'}"
                     if rel.valid_to:
-                        valid_interval += (
-                            f" -> To: {rel.valid_to[:10]}"
-                        )
+                        valid_interval += f" ➔ To: {rel.valid_to[:10]}"
                     else:
-                        valid_interval += " -> Present"
-
-                    triple_str = None
-
-                    if rel.triple:
-
-                        triple_str = (
-                            f"({rel.triple.subject} -> "
-                            f"{rel.triple.predicate} -> "
-                            f"{rel.triple.object})"
-                        )
-
-                    attributions.append(
-                        MemoryAttribution(
-                            memory_id=rel.id,
-                            content=rel.content,
-                            memory_type=rel.memory_type,
-                            status=rel.status,
-                            similarity_score=0.95,
-                            confidence=rel.confidence,
-                            is_active=False,
-                            filter_reason=(
-                                "SUPERSEDED: "
-                                f"{rel.supersede_reason or 'Replaced by newer update'}"
-                            ),
-                            valid_interval=valid_interval,
-                            created_at=rel.created_at,
-                            triple_repr=triple_str
-                        )
-                    )
+                        valid_interval += " ➔ Present"
+                    
+                    triple_str = f"({rel.triple.subject} ➔ {rel.triple.predicate} ➔ {rel.triple.object})" if rel.triple else None
+                    attributions.append(MemoryAttribution(
+                        memory_id=rel.id,
+                        content=rel.content,
+                        memory_type=rel.memory_type,
+                        status=rel.status,
+                        similarity_score=0.90,
+                        confidence=rel.confidence,
+                        is_active=False,
+                        filter_reason=f"SUPERSEDED: {rel.supersede_reason or 'Replaced by newer state'}",
+                        valid_interval=valid_interval,
+                        created_at=rel.created_at,
+                        triple_repr=triple_str
+                    ))
 
         return MemorySearchResult(
             active_memories=active_list[:top_k],
@@ -415,12 +287,7 @@ class ChronosMemoryEngine:
             all_retrieved=all_retrieved,
             attributions=attributions,
             conflict_detected=len(superseded_list) > 0,
-            conflict_summary=(
-                f"Identified {len(superseded_list)} "
-                f"superseded historical record(s)"
-                if superseded_list
-                else None
-            )
+            conflict_summary=f"Identified {len(superseded_list)} historical superseded state(s)" if superseded_list else None
         )
 
     # ============================================================
@@ -436,664 +303,129 @@ class ChronosMemoryEngine:
         provider: Optional[str] = "local",
         api_key: Optional[str] = None
     ) -> str:
-
         """
-        Generates the final answer.
-
-        Vector search is ONLY used to retrieve candidates.
-
-        Query intent decides which candidate memory is actually
-        relevant.
-
-        Historical queries prefer superseded memories.
-        Current queries prefer active memories.
+        Synthesizes the assistant answer.
+        Supports external LLMs (Gemini, OpenAI) or local deterministic cognitive reasoning.
         """
-
-        # ========================================================
-        # EXTERNAL PROVIDERS
-        # ========================================================
-
         if provider == "gemini" and api_key:
-
-            return self._call_gemini_api(
-                query,
-                search_result,
-                conflict_notes,
-                api_key
-            )
-
+            return self._call_gemini_api(query, search_result, conflict_notes, api_key)
         elif provider == "openai" and api_key:
+            return self._call_openai_api(query, search_result, conflict_notes, api_key)
 
-            return self._call_openai_api(
-                query,
-                search_result,
-                conflict_notes,
-                api_key
-            )
-
-        # ========================================================
-        # LOCAL SYNTHESIS
-        # ========================================================
-
+        # --------------------------------------------------------
+        # Local Cognitive Synthesis
+        # --------------------------------------------------------
         active_mems = list(search_result.active_memories)
-        superseded_mems = list(
-            search_result.superseded_memories
-        )
-
+        superseded_mems = list(search_result.superseded_memories)
         q = query.lower().strip()
+        q_clean = q.replace("?", "").replace(".", "").replace(",", "").replace("!", "")
 
-        # ========================================================
-        # 1. USER JUST STORED A NEW MEMORY
-        # ========================================================
-
+        # 1. User just stored a new fact/decision/preference
         if new_extracted:
-
-            extracted_summary = ", ".join(
-                e.content for e in new_extracted
-            )
-
+            extracted_summary = ", ".join(e.content for e in new_extracted)
             if conflict_notes:
+                res_txt = " | ".join(conflict_notes)
+                return f"Got it! I have updated my knowledge: **{extracted_summary}**. ({res_txt}). The previous assertion has been archived into your historical timeline."
+            return f"I've committed that to memory: **{extracted_summary}**."
 
-                resolution_txt = " | ".join(
-                    conflict_notes
-                )
-
-                return (
-                    f"Got it! I've updated my knowledge: "
-                    f"**{extracted_summary}**. "
-                    f"({resolution_txt}). "
-                    f"I have archived the previous state into "
-                    f"your historical timeline."
-                )
-
-            return (
-                f"I've committed that to memory: "
-                f"**{extracted_summary}**."
-            )
-
-        # ========================================================
-        # 2. DETECT HISTORICAL INTENT
-        # ========================================================
-
-        historical_phrases = [
-            "previously",
-            "before",
-            "used to",
-            "formerly",
-            "old",
-            "prior",
-            "what was",
-            "what were",
-            "in the past",
-            "back then",
-            "earlier"
-        ]
-
-        is_historical = any(
-            phrase in q
-            for phrase in historical_phrases
-        )
-
-        # ========================================================
-        # 3. HISTORICAL QUESTIONS
-        # ========================================================
+        # 2. Historical / Retrospective Intent Query
+        historical_phrases = ["previously", "before", "used to", "formerly", "old", "prior", "in the past", "back then", "earlier", "what did i used to", "where did i live before", "what was my"]
+        is_historical = any(p in q for p in historical_phrases)
 
         if is_historical:
-
-            historical_candidates = []
-
-            # ----------------------------------------------------
-            # Location history
-            # ----------------------------------------------------
-
-            if (
-                "where" in q
-                or "live" in q
-                or "living" in q
-                or "home" in q
-            ):
-
+            if superseded_mems:
+                # Find best matching historical memory
                 for mem in superseded_mems:
-
-                    if not mem.triple:
-                        continue
-
-                    predicate = (
-                        mem.triple.predicate.lower()
-                    )
-
-                    if predicate == "lives_in":
-
-                        historical_candidates.append(mem)
-
-            # ----------------------------------------------------
-            # Beverage history
-            # ----------------------------------------------------
-
-            elif (
-                "drink" in q
-                or "beverage" in q
-            ):
-
-                for mem in superseded_mems:
-
-                    if not mem.triple:
-                        continue
-
-                    predicate = (
-                        mem.triple.predicate.lower()
-                    )
-
-                    if predicate in [
-                        "primary_beverage",
-                        "prefers_beverage"
-                    ]:
-
-                        historical_candidates.append(mem)
-
-            # ----------------------------------------------------
-            # Database history
-            # ----------------------------------------------------
-
-            elif "database" in q:
-
-                for mem in superseded_mems:
-
-                    if not mem.triple:
-                        continue
-
-                    if (
-                        mem.triple.predicate.lower()
-                        == "database_choice"
-                    ):
-
-                        historical_candidates.append(mem)
-
-            # ----------------------------------------------------
-            # Framework history
-            # ----------------------------------------------------
-
-            elif (
-                "framework" in q
-                or "technology" in q
-                or "tech" in q
-                or "stack" in q
-            ):
-
-                for mem in superseded_mems:
-
-                    if not mem.triple:
-                        continue
-
-                    if (
-                        mem.triple.predicate.lower()
-                        == "framework_choice"
-                    ):
-
-                        historical_candidates.append(mem)
-
-            # ----------------------------------------------------
-            # Generic historical fallback
-            # ----------------------------------------------------
-
-            if not historical_candidates:
-
-                historical_candidates = list(
-                    superseded_mems
-                )
-
-            # ----------------------------------------------------
-            # Return historical memory
-            # ----------------------------------------------------
-
-            if historical_candidates:
-
-                historical_memory = (
-                    historical_candidates[0]
-                )
-
-                if historical_memory.triple:
-
-                    obj = (
-                        historical_memory
-                        .triple
-                        .object
-                    )
-
-                    predicate = (
-                        historical_memory
-                        .triple
-                        .predicate
-                        .lower()
-                    )
-
-                    if predicate == "lives_in":
-
-                        return (
-                            f"Before the current update, "
-                            f"you lived in **{obj}**. "
-                            f"*(Historical memory: "
-                            f"{historical_memory.content}.)*"
-                        )
-
-                    return (
-                        f"Previously, your memory was "
-                        f"**{obj}**. "
-                        f"*(Historical memory: "
-                        f"{historical_memory.content}.)*"
-                    )
-
-                return (
-                    f"I found a historical memory: "
-                    f"**{historical_memory.content}**."
-                )
-
-            # No historical memory found
-
-            return (
-                "I don't have a relevant historical memory "
-                "for that."
-            )
-
-        # ========================================================
-        # 4. CURRENT LOCATION
-        # ========================================================
-
-        if any(x in q for x in [
-            "where do i live",
-            "where am i living",
-            "where is my home",
-            "where do you think i live",
-            "where do i currently live",
-            "where am i located",
-            "where's my home"
-        ]):
-
-            relevant = []
-
-            for mem in active_mems:
-
-                if not mem.triple:
-                    continue
-
-                predicate = (
-                    mem.triple.predicate.lower()
-                )
-
-                if predicate == "lives_in":
-                    relevant.append(mem)
-
-            if relevant:
-
-                mem = relevant[0]
-
-                obj = mem.triple.object
-
-                return (
-                    f"Based on my memory, "
-                    f"you live in **{obj}**."
-                )
-
-            return (
-                "I don't have a recorded current "
-                "location for you."
-            )
-
-        # ========================================================
-        # 5. CURRENT BEVERAGE
-        # ========================================================
-
-        if any(x in q for x in [
-            "favorite beverage",
-            "favourite beverage",
-            "favorite drink",
-            "favourite drink",
-            "what do i drink",
-            "what beverage do i",
-            "what drink do i",
-            "which beverage do i",
-            "which drink do i",
-            "do i drink"
-        ]):
-
-            relevant = []
-
-            for mem in active_mems:
-
-                if not mem.triple:
-                    continue
-
-                predicate = (
-                    mem.triple.predicate.lower()
-                )
-
-                if predicate in [
-                    "primary_beverage",
-                    "prefers_beverage"
-                ]:
-
-                    relevant.append(mem)
-
-            if relevant:
-
-                mem = relevant[0]
-
-                obj = mem.triple.object
-
-                return (
-                    f"Based on my memory, "
-                    f"your preferred beverage is "
-                    f"**{obj}**."
-                )
-
-            return (
-                "I don't have a recorded beverage "
-                "preference for you."
-            )
-
-        # ========================================================
-        # 6. CURRENT DATABASE
-        # ========================================================
-
-        if any(x in q for x in [
-            "what database",
-            "which database",
-            "database did we",
-            "database are we",
-            "database do we use",
-            "what db",
-            "which db"
-        ]):
-
-            relevant = []
-
-            for mem in active_mems:
-
-                if not mem.triple:
-                    continue
-
-                predicate = (
-                    mem.triple.predicate.lower()
-                )
-
-                if predicate == "database_choice":
-
-                    relevant.append(mem)
-
-            if relevant:
-
-                mem = relevant[0]
-
-                obj = mem.triple.object
-
-                return (
-                    f"Based on my memory, "
-                    f"we chose **{obj}** as the database."
-                )
-
-            return (
-                "I don't have a recorded database "
-                "decision for the project."
-            )
-
-        # ========================================================
-        # 7. CURRENT FRAMEWORK / TECHNOLOGY
-        # ========================================================
-
-        if any(x in q for x in [
-            "what framework",
-            "which framework",
-            "what technology",
-            "which technology",
-            "what tech",
-            "which tech",
-            "what stack",
-            "which stack"
-        ]):
-
-            relevant = []
-
-            for mem in active_mems:
-
-                if not mem.triple:
-                    continue
-
-                predicate = (
-                    mem.triple.predicate.lower()
-                )
-
-                if predicate == "framework_choice":
-
-                    relevant.append(mem)
-
-            if relevant:
-
-                mem = relevant[0]
-
-                obj = mem.triple.object
-
-                return (
-                    f"Based on my memory, "
-                    f"the project uses **{obj}**."
-                )
-
-            return (
-                "I don't have a recorded framework "
-                "or technology choice for that."
-            )
-
-        # ========================================================
-        # 8. NAME
-        # ========================================================
-
-        if any(x in q for x in [
-            "what is my name",
-            "what's my name",
-            "who am i",
-            "what should you call me",
-            "what do you call me"
-        ]):
-
-            relevant = []
-
-            for mem in active_mems:
-
-                if not mem.triple:
-                    continue
-
-                predicate = (
-                    mem.triple.predicate.lower()
-                )
-
-                if predicate == "has_name":
-
-                    relevant.append(mem)
-
-            if relevant:
-
-                mem = relevant[0]
-
-                obj = mem.triple.object
-
-                return (
-                    f"Based on my memory, "
-                    f"your name is **{obj}**."
-                )
-
-            return (
-                "I don't have your name recorded yet."
-            )
-
-        # ========================================================
-        # 9. JOB / ROLE
-        # ========================================================
-
-        if any(x in q for x in [
-            "what is my job",
-            "what do i do",
-            "where do i work",
-            "what is my role",
-            "what's my role",
-            "what profession",
-            "what do i work as"
-        ]):
-
-            relevant = []
-
-            for mem in active_mems:
-
-                if not mem.triple:
-                    continue
-
-                predicate = (
-                    mem.triple.predicate.lower()
-                )
-
-                if predicate in [
-                    "works_as",
-                    "employed_at"
-                ]:
-
-                    relevant.append(mem)
-
-            if relevant:
-
-                mem = relevant[0]
-
-                obj = mem.triple.object
-
-                return (
-                    f"Based on my memory, "
-                    f"you are associated with **{obj}**."
-                )
-
-            return (
-                "I don't have your current job or role "
-                "recorded yet."
-            )
-
-        # ========================================================
-        # 10. DIET
-        # ========================================================
-
-        if any(x in q for x in [
-            "what is my diet",
-            "what do i eat",
-            "what can i eat",
-            "am i vegan",
-            "am i vegetarian",
-            "what is my dietary"
-        ]):
-
-            relevant = []
-
-            for mem in active_mems:
-
-                if not mem.triple:
-                    continue
-
-                predicate = (
-                    mem.triple.predicate.lower()
-                )
-
-                if predicate in [
-                    "dietary_lifestyle",
-                    "avoids_food"
-                ]:
-
-                    relevant.append(mem)
-
-            if relevant:
-
-                mem = relevant[0]
-
-                obj = mem.triple.object
-
-                return (
-                    f"Based on my memory, "
-                    f"your dietary information is "
-                    f"**{obj}**."
-                )
-
-            return (
-                "I don't have your dietary information "
-                "recorded yet."
-            )
-
-        # ========================================================
-        # 11. GENERIC QUESTION
-        # ========================================================
-
-        if "?" in q:
-
-            # CRITICAL:
-            #
-            # Never blindly use active_mems[0].
-            #
-            # If the question does not match a known memory
-            # intent, unrelated memories are rejected.
-
-            return (
-                "I don't have any recorded memories "
-                "regarding that yet."
-            )
-
-        # ========================================================
-        # 12. NON-QUESTION
-        # ========================================================
-
+                    if mem.triple:
+                        pred = mem.triple.predicate.replace('_', ' ')
+                        obj = mem.triple.object
+                        return f"Previously, your recorded {pred} was **{obj}**. *(Historical memory: {mem.content})*"
+                return f"I found a historical memory: **{superseded_mems[0].content}**."
+            return "I don't have any superseded historical memories regarding that."
+
+        # 3. Location Queries
+        if any(w in q for w in ["where do i live", "where am i living", "where is my home", "where do you think i live", "where do i currently live", "where am i located", "where's my home", "what city"]):
+            loc_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["lives_in", "origin_from"]]
+            if loc_mems:
+                return f"Based on my memory, you live in **{loc_mems[0].triple.object}**."
+            return "I don't have a recorded current location for you."
+
+        # 4. Beverage / Drink Preference
+        if any(w in q for w in ["favorite beverage", "favourite beverage", "favorite drink", "favourite drink", "what do i drink", "what beverage", "which drink", "coffee", "matcha", "tea"]):
+            bev_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["primary_beverage", "prefers_beverage"]]
+            if bev_mems:
+                return f"Based on my memory, your preferred beverage is **{bev_mems[0].triple.object}**."
+            return "I don't have a recorded beverage preference for you."
+
+        # 5. Database Choice
+        if any(w in q for w in ["what database", "which database", "database did we", "database are we", "database do we use", "what db", "which db"]):
+            db_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["database_choice", "decided_to_use", "migrated_tech"]]
+            if db_mems:
+                return f"Based on my memory, we chose **{db_mems[0].triple.object}** as the database."
+            return "I don't have a recorded database decision for the project."
+
+        # 6. Technology Stack / Framework / IDE Tool
+        if any(w in q for w in ["what framework", "which framework", "what technology", "what stack", "what ide", "favorite ide", "what tool"]):
+            tech_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["framework_choice", "prefers_tool", "decided_to_use"]]
+            if tech_mems:
+                return f"Based on my memory, you use **{tech_mems[0].triple.object}**."
+            return "I don't have a recorded technology choice for that."
+
+        # 7. Diet / Health / Food / Allergies / Dinner / Meals
+        if any(w in q for w in ["what is my diet", "what do i eat", "what can i eat", "what should i eat", "what should i have for dinner", "what to eat", "dinner", "lunch", "breakfast", "meal", "food", "am i vegan", "what is my current diet", "diet", "allergic", "allergy", "allergies"]):
+            diet_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["dietary_lifestyle", "avoids_food", "allergic_to"]]
+            if diet_mems:
+                lifestyle_mem = next((m for m in diet_mems if m.triple.predicate == "dietary_lifestyle"), None)
+                allergies = [m.triple.object for m in diet_mems if m.triple.predicate == "allergic_to"]
+                
+                if "dinner" in q or "meal" in q or "lunch" in q or "breakfast" in q or "what should i have" in q or "what can i eat" in q:
+                    lifestyle_str = lifestyle_mem.triple.object if lifestyle_mem else "your preferences"
+                    allergy_str = f" (avoiding {', '.join(allergies)})" if allergies else ""
+                    if "vegan" in lifestyle_str.lower():
+                        return f"Since you are **{lifestyle_str}**{allergy_str}, I recommend a delicious vegan dinner like a roasted tofu buddha bowl, chickpea tikka masala, or avocado sushi rolls!"
+                    elif "keto" in lifestyle_str.lower():
+                        return f"Since you follow a **{lifestyle_str}** diet{allergy_str}, I recommend grilled salmon with garlic asparagus or a keto steak avocado salad!"
+                    return f"Based on your active dietary lifestyle (**{lifestyle_str}**){allergy_str}, you should choose a meal that fits your routine."
+                
+                facts = [f"{m.triple.predicate.replace('_', ' ')}: **{m.triple.object}**" for m in diet_mems]
+                return f"Based on my memory, your dietary information is: {', '.join(facts)}."
+            return "I don't have your dietary or allergy information recorded yet."
+
+        # 8. Profession / Role / Company
+        if any(w in q for w in ["what is my job", "what do i do", "where do i work", "what is my role", "what's my role", "what profession", "what do i work as"]):
+            job_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["works_as", "employed_at", "studies_at"]]
+            if job_mems:
+                return f"Based on my memory, you are associated with **{job_mems[0].triple.object}**."
+            return "I don't have your current job or role recorded yet."
+
+        # 9. Contact / Phone / Email
+        if any(w in q for w in ["what is my phone", "what is my number", "what's my phone", "what is my email", "how to contact"]):
+            contact_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["has_phone", "has_email"]]
+            if contact_mems:
+                return f"Based on my memory, your contact detail is **{contact_mems[0].triple.object}**."
+            return "I don't have your contact information recorded."
+
+        # 10. Confidential Project
+        if any(w in q for w in ["secret project", "confidential project"]):
+            proj_mems = [m for m in active_mems if m.triple and m.triple.predicate == "confidential_project"]
+            if proj_mems:
+                return f"Based on my memory, your confidential project is codenamed **{proj_mems[0].triple.object}**."
+            return "I don't have any confidential project recorded for you."
+
+        # 11. General Matching: If active memories exist with high relevance to question words
         if active_mems:
+            top_mem = active_mems[0]
+            if top_mem.triple:
+                sub = top_mem.triple.subject
+                pred = top_mem.triple.predicate.replace("_", " ")
+                obj = top_mem.triple.object
+                return f"Based on my memory, {sub} {pred} **{obj}**."
+            return f"Based on my memory: {top_mem.content}."
 
-            top_active = active_mems[0]
-
-            main_fact = top_active.content
-
-            if top_active.triple:
-
-                subject = (
-                    top_active.triple.subject
-                )
-
-                predicate = (
-                    top_active.triple.predicate
-                    .replace("_", " ")
-                )
-
-                obj = (
-                    top_active.triple.object
-                )
-
-                qualifier = ""
-
-                if top_active.triple.qualifier:
-
-                    qualifier = (
-                        f" ({top_active.triple.qualifier})"
-                    )
-
-                main_fact = (
-                    f"{subject} {predicate} "
-                    f"**{obj}**{qualifier}"
-                )
-
-            return (
-                f"Based on my memory, "
-                f"{main_fact}."
-            )
-
-        # ========================================================
-        # 13. NOTHING FOUND
-        # ========================================================
-
-        return (
-            "I don't have any recorded memories "
-            "regarding that yet. You can tell me your "
-            "preferences, decisions, or details anytime "
-            "and I will remember them across sessions!"
-        )
+        return "I don't have any recorded memories regarding that yet. You can tell me your preferences, decisions, or details anytime and I will remember them across sessions!"
 
     # ============================================================
-    # FORGET / GDPR
+    # FORGET / GDPR PURGE HANDLER
     # ============================================================
 
     def _handle_forget_command(
@@ -1104,93 +436,38 @@ class ChronosMemoryEngine:
         forget_target: str,
         sim_date: Optional[str]
     ) -> ChatResponse:
-
-        candidates = self.store.vector_search(
-            user_id=user_id,
-            query=forget_target,
-            top_k=5,
-            min_similarity=0.2
-        )
-
+        """Handles targeted GDPR memory purging and permanent erasure."""
+        candidates = self.store.vector_search(user_id=user_id, query=forget_target, top_k=5, min_similarity=0.15)
         forgotten_count = 0
         details = []
 
         for mem, score in candidates:
-
             if mem.status != MemoryStatus.FORGOTTEN:
-
                 self.store.forget_memory(
                     memory_id=mem.id,
                     user_id=user_id,
-                    reason=(
-                        f"User instructed to forget: "
-                        f"'{forget_target}'"
-                    )
+                    reason=f"User instructed to forget: '{forget_target}'"
                 )
-
                 forgotten_count += 1
+                details.append(f"Purged #{mem.id[:6]} ({mem.memory_type.value})")
 
-                details.append(
-                    f"Purged memory ID #{mem.id[:8]} "
-                    f"({mem.memory_type.value})"
-                )
-
-        # --------------------------------------------------------
-        # Fallback keyword matching
-        # --------------------------------------------------------
-
+        # Fallback lexical sweep across all memories for the user
         if forgotten_count == 0:
-
-            all_mems = self.store.get_user_memories(
-                user_id=user_id,
-                include_superseded=True
-            )
-
+            all_mems = self.store.get_user_memories(user_id=user_id, include_superseded=True)
             for mem in all_mems:
-
-                if any(
-                    word.lower() in mem.content.lower()
-                    for word in forget_target.split()
-                    if len(word) > 2
-                ):
-
+                if any(w.lower() in mem.content.lower() for w in forget_target.split() if len(w) > 2):
                     self.store.forget_memory(
                         mem.id,
                         user_id=user_id,
-                        reason=(
-                            f"Keyword match purge: "
-                            f"'{forget_target}'"
-                        )
+                        reason=f"Keyword match purge: '{forget_target}'"
                     )
-
                     forgotten_count += 1
+                    details.append(f"Purged #{mem.id[:6]}")
 
-                    details.append(
-                        f"Purged memory ID #{mem.id[:8]}"
-                    )
-
-        answer = (
-            f"I have purged {forgotten_count} memory record(s) "
-            f"matching '{forget_target}'. "
-            f"An immutable audit log entry has been generated, "
-            f"and this information will never be recalled."
-        )
-
-        self.store.save_chat_message(
-            user_id=user_id,
-            session_id=session_id,
-            role="user",
-            content=raw_message,
-            simulated_date=sim_date
-        )
-
-        self.store.save_chat_message(
-            user_id=user_id,
-            session_id=session_id,
-            role="assistant",
-            content=answer,
-            simulated_date=sim_date
-        )
+        answer = f"I have purged {forgotten_count} memory record(s) matching '{forget_target}'. An immutable audit log entry has been generated, and this information has been permanently erased."
+        
+        self.store.save_chat_message(user_id=user_id, session_id=session_id, role="user", content=raw_message, simulated_date=sim_date)
+        self.store.save_chat_message(user_id=user_id, session_id=session_id, role="assistant", content=answer, simulated_date=sim_date)
 
         return ChatResponse(
             answer=answer,
@@ -1198,16 +475,13 @@ class ChronosMemoryEngine:
             session_id=session_id,
             used_memories=[],
             superseded_memories=[],
-            conflict_resolution_notes=[
-                f"GDPR Purge executed: "
-                f"{forgotten_count} records erased."
-            ],
+            conflict_resolution_notes=[f"GDPR Purge executed: {forgotten_count} records erased."],
             new_memories_extracted=[],
             simulated_date=sim_date
         )
 
     # ============================================================
-    # GEMINI
+    # EXTERNAL LLM PROVIDERS
     # ============================================================
 
     def _call_gemini_api(
@@ -1217,94 +491,28 @@ class ChronosMemoryEngine:
         conflict_notes: List[str],
         api_key: str
     ) -> str:
-
         try:
-
-            url = (
-                "https://generativelanguage.googleapis.com/"
-                "v1beta/models/gemini-1.5-flash:"
-                f"generateContent?key={api_key}"
-            )
-
-            context = "\n".join(
-                [
-                    f"- [ACTIVE MEMORY #{m.id[:6]}]: "
-                    f"{m.content}"
-                    for m in search_res.active_memories
-                ]
-            )
-
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+            context = "\n".join([f"- [ACTIVE MEMORY #{m.id[:6]}]: {m.content}" for m in search_res.active_memories])
             if search_res.superseded_memories:
+                context += "\n" + "\n".join([f"- [HISTORICAL SUPERSEDED #{m.id[:6]}]: {m.content} (Reason: {m.supersede_reason})" for m in search_res.superseded_memories])
 
-                context += "\n" + "\n".join(
-                    [
-                        f"- [HISTORICAL SUPERSEDED "
-                        f"#{m.id[:6]} - DO NOT USE AS CURRENT "
-                        f"TRUTH]: {m.content} "
-                        f"(Reason: {m.supersede_reason})"
-                        for m in search_res.superseded_memories
-                    ]
-                )
-
-            prompt = f"""
-System:
-You are MemoryOS, an AI assistant with strict
-temporal memory.
-
+            prompt = f"""You are MemoryOS, an AI assistant with persistent temporal memory.
 Rules:
-1. Answer the user's actual question.
-2. Use only relevant active memories for current facts.
-3. Do not use unrelated memories.
-4. Superseded memories represent historical information.
-5. If the user explicitly asks about the past, historical
-   memories may be used.
-6. If no relevant memory exists, say so.
-7. Do not invent memories.
-8. Explain the memory used when appropriate.
+1. Answer the user's question accurately using relevant active memories.
+2. Superseded memories are historical; only cite them if the user asks about the past.
+3. If no relevant memory exists, say so honestly without inventing facts.
 
-Memory Context:
+Context:
 {context}
 
-User Question:
-{query}
-"""
-
-            resp = requests.post(
-                url,
-                json={
-                    "contents": [
-                        {
-                            "parts": [
-                                {
-                                    "text": prompt
-                                }
-                            ]
-                        }
-                    ]
-                },
-                timeout=10
-            )
-
+Question:
+{query}"""
+            resp = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=10)
             data = resp.json()
-
-            return (
-                data["candidates"][0]
-                ["content"]["parts"][0]["text"]
-            )
-
+            return data["candidates"][0]["content"]["parts"][0]["text"]
         except Exception:
-
-            return self._synthesize_answer(
-                query=query,
-                search_result=search_res,
-                conflict_notes=conflict_notes,
-                new_extracted=[],
-                provider="local"
-            )
-
-    # ============================================================
-    # OPENAI
-    # ============================================================
+            return self._synthesize_answer(query, search_res, conflict_notes, [], "local")
 
     def _call_openai_api(
         self,
@@ -1313,217 +521,107 @@ User Question:
         conflict_notes: List[str],
         api_key: str
     ) -> str:
-
         try:
-
             url = "https://api.openai.com/v1/chat/completions"
-
-            context = "\n".join(
-                [
-                    f"- [ACTIVE MEMORY #{m.id[:6]}]: "
-                    f"{m.content}"
-                    for m in search_res.active_memories
-                ]
-            )
-
+            context = "\n".join([f"- [ACTIVE MEMORY #{m.id[:6]}]: {m.content}" for m in search_res.active_memories])
             if search_res.superseded_memories:
+                context += "\n" + "\n".join([f"- [HISTORICAL SUPERSEDED #{m.id[:6]}]: {m.content} (Reason: {m.supersede_reason})" for m in search_res.superseded_memories])
 
-                context += "\n" + "\n".join(
-                    [
-                        f"- [HISTORICAL SUPERSEDED "
-                        f"#{m.id[:6]}]: {m.content} "
-                        f"(Reason: {m.supersede_reason})"
-                        for m in search_res.superseded_memories
-                    ]
-                )
+            system_prompt = "You are MemoryOS, a contradiction-aware AI assistant with persistent temporal memory."
+            user_prompt = f"Context:\n{context}\n\nQuestion:\n{query}"
 
-            system_prompt = """
-You are MemoryOS, an AI assistant with persistent
-temporal memory.
-
-Rules:
-- Answer the actual user question.
-- Use only relevant active memories for current facts.
-- Never use unrelated memories just because vector
-  similarity is high.
-- Superseded memories are historical.
-- If the user asks about previous or old information,
-  historical memories may be used.
-- Never invent information.
-- If no relevant memory exists, say so.
-"""
-
-            user_prompt = f"""
-Memory Context:
-
-{context}
-
-User Question:
-
-{query}
-"""
-
-            response = requests.post(
+            resp = requests.post(
                 url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
-                },
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json={
                     "model": "gpt-4o-mini",
                     "messages": [
-                        {
-                            "role": "system",
-                            "content": system_prompt
-                        },
-                        {
-                            "role": "user",
-                            "content": user_prompt
-                        }
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
                     ],
                     "temperature": 0.2
                 },
-                timeout=15
+                timeout=12
             )
-
-            data = response.json()
-
-            return (
-                data["choices"][0]
-                ["message"]["content"]
-            )
-
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
         except Exception:
-
-            return self._synthesize_answer(
-                query=query,
-                search_result=search_res,
-                conflict_notes=conflict_notes,
-                new_extracted=[],
-                provider="local"
-            )
+            return self._synthesize_answer(query, search_res, conflict_notes, [], "local")
 
     # ============================================================
-    # KNOWLEDGE GRAPH
+    # KNOWLEDGE GRAPH & TIMELINE GENERATORS
     # ============================================================
 
-    def get_knowledge_graph(
-        self,
-        user_id: str
-    ) -> Dict[str, Any]:
-
-        """
-        Generates node and edge data for the
-        Knowledge Graph visualization.
-        """
-
+    def get_knowledge_graph(self, user_id: str, simulated_date: Optional[str] = None) -> Dict[str, Any]:
+        """Generates node and edge data for the interactive Knowledge Graph."""
         memories = self.store.get_user_memories(
             user_id=user_id,
             include_superseded=True,
-            include_forgotten=False
+            include_forgotten=False,
+            simulated_date=simulated_date
         )
 
         nodes = []
         edges = []
 
-        # --------------------------------------------------------
-        # Central User Node
-        # --------------------------------------------------------
-
+        # Central User Root Node
         user_node_id = f"user_{user_id}"
-
         nodes.append({
             "id": user_node_id,
             "label": f"User: {user_id.capitalize()}",
+            "full_content": f"Root identity node for tenant: {user_id.upper()}",
             "type": "USER",
             "status": "ACTIVE",
-            "color": "#6366f1"
+            "color": "#6366f1",
+            "confidence": 1.0
         })
 
-        node_ids = {
-            user_node_id
-        }
-
-        # --------------------------------------------------------
-        # Memory Nodes
-        # --------------------------------------------------------
+        node_ids = {user_node_id}
 
         for mem in memories:
-
             mem_node_id = f"mem_{mem.id[:8]}"
-
-            label = (
-                mem.triple.object
-                if mem.triple
-                else mem.content[:24]
-            )
+            label = mem.triple.object if mem.triple else mem.content[:24]
 
             if mem.status == MemoryStatus.ACTIVE:
-
                 status_color = "#10b981"
-
             elif mem.status == MemoryStatus.SUPERSEDED:
-
                 status_color = "#f59e0b"
-
+            elif mem.status == MemoryStatus.DECAYED:
+                status_color = "#64748b"
             else:
-
-                status_color = "#6b7280"
+                status_color = "#94a3b8"
 
             nodes.append({
                 "id": mem_node_id,
+                "memory_id": mem.id,
                 "label": label,
                 "full_content": mem.content,
                 "type": mem.memory_type.value,
                 "status": mem.status.value,
                 "color": status_color,
                 "confidence": mem.confidence,
-                "valid_interval": (
-                    f"{mem.valid_from[:10] if mem.valid_from else ''}"
-                    f" -> "
-                    f"{mem.valid_to[:10] if mem.valid_to else 'Now'}"
-                ),
+                "importance": mem.importance,
+                "valid_interval": f"{mem.valid_from[:10] if mem.valid_from else 'Start'} ➔ {mem.valid_to[:10] if mem.valid_to else 'Present'}",
                 "supersede_reason": mem.supersede_reason
             })
-
             node_ids.add(mem_node_id)
 
-            # ----------------------------------------------------
-            # User -> Memory
-            # ----------------------------------------------------
-
-            rel_label = (
-                mem.triple.predicate.replace("_", " ")
-                if mem.triple
-                else "stated"
-            )
-
+            # User -> Memory edge
+            rel_label = mem.triple.predicate.replace("_", " ") if mem.triple else "stated"
             edges.append({
                 "id": f"e_{user_node_id}_{mem_node_id}",
                 "source": user_node_id,
                 "target": mem_node_id,
                 "label": rel_label,
                 "status": mem.status.value,
-                "is_dashed": (
-                    mem.status != MemoryStatus.ACTIVE
-                )
+                "is_dashed": (mem.status != MemoryStatus.ACTIVE)
             })
 
-            # ----------------------------------------------------
-            # Memory Evolution Link
-            # ----------------------------------------------------
-
+            # Mutation / Evolution edge (old -> new)
             if mem.superseded_by_id:
-
-                target_mem_id = (
-                    f"mem_{mem.superseded_by_id[:8]}"
-                )
-
+                target_mem_id = f"mem_{mem.superseded_by_id[:8]}"
                 edges.append({
-                    "id": (
-                        f"evol_{mem_node_id}_"
-                        f"{target_mem_id}"
-                    ),
+                    "id": f"evol_{mem_node_id}_{target_mem_id}",
                     "source": mem_node_id,
                     "target": target_mem_id,
                     "label": "mutated_to",
@@ -1532,35 +630,13 @@ User Question:
                     "is_dashed": True
                 })
 
-        return {
-            "nodes": nodes,
-            "edges": edges
-        }
+        return {"nodes": nodes, "edges": edges}
 
-    # ============================================================
-    # TIMELINE
-    # ============================================================
-
-    def get_timeline_events(
-        self,
-        user_id: str
-    ) -> List[Dict[str, Any]]:
-
-        """
-        Generates a sorted chronological timeline of
-        memory state transitions.
-        """
-
-        memories = self.store.get_user_memories(
-            user_id=user_id,
-            include_superseded=True,
-            include_forgotten=True
-        )
-
+    def get_timeline_events(self, user_id: str) -> List[Dict[str, Any]]:
+        """Generates a sorted chronological timeline of memory state transitions."""
+        memories = self.store.get_user_memories(user_id=user_id, include_superseded=True, include_forgotten=True)
         events = []
-
         for mem in memories:
-
             events.append({
                 "id": mem.id,
                 "content": mem.content,
@@ -1571,15 +647,7 @@ User Question:
                 "valid_to": mem.valid_to,
                 "superseded_by_id": mem.superseded_by_id,
                 "supersede_reason": mem.supersede_reason,
-                "triple": (
-                    mem.triple.dict()
-                    if mem.triple
-                    else None
-                )
+                "triple": mem.triple.dict() if mem.triple else None
             })
-
-        events.sort(
-            key=lambda x: x["created_at"]
-        )
-
+        events.sort(key=lambda x: x["created_at"])
         return events

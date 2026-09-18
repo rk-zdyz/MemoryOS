@@ -1,10 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Orbitron:wght@500;600;700;800;900&family=Share+Tech+Mono&display=swap');
 
 :root {
-  /* ========================================================= */
-  /* CYBERPUNK / GLITCH DESIGN SYSTEM TOKENS                  */
-  /* ========================================================= */
-  
   /* Backgrounds */
   --bg-void: #0a0a0f;
   --bg-primary: #0a0a0f;
@@ -46,10 +42,6 @@
   --glow-cyan-md: 0 0 8px #00d4ff, 0 0 20px rgba(0, 212, 255, 0.45);
 }
 
-/* ========================================================= */
-/* BASE RESETS & CRT / CIRCUIT BACKGROUND                    */
-/* ========================================================= */
-
 * {
   margin: 0;
   padding: 0;
@@ -78,7 +70,6 @@ body {
   z-index: 10;
 }
 
-/* Global Subtle Scanlines Overlay */
 .cyber-scanlines {
   position: fixed;
   top: 0;
@@ -97,7 +88,6 @@ body {
   opacity: 0.75;
 }
 
-/* Subtle Circuit / Matrix Grid Background */
 .cyber-grid-bg {
   position: fixed;
   top: 0;
@@ -111,10 +101,6 @@ body {
     linear-gradient(90deg, rgba(0, 255, 136, 0.03) 1px, transparent 1px);
   background-size: 48px 48px;
 }
-
-/* ========================================================= */
-/* CHAMFER CORNER UTILITIES (POLYGON CLIP-PATHS)             */
-/* ========================================================= */
 
 .cyber-chamfer {
   clip-path: polygon(
@@ -133,18 +119,6 @@ body {
     6px 100%, 0 calc(100% - 6px)
   );
 }
-
-.cyber-chamfer-tl-br {
-  clip-path: polygon(
-    0 12px, 12px 0,
-    100% 0, 100% calc(100% - 12px),
-    calc(100% - 12px) 100%, 0 100%
-  );
-}
-
-/* ========================================================= */
-/* CYBERPUNK CARDS & HUD PANELS                              */
-/* ========================================================= */
 
 .cyber-card {
   background: var(--bg-card);
@@ -184,12 +158,6 @@ body {
   background: linear-gradient(90deg, var(--accent-secondary) 0%, transparent 80%);
 }
 
-.cyber-card-secondary:hover {
-  border-color: rgba(255, 0, 255, 0.5);
-  box-shadow: 0 0 16px rgba(255, 0, 255, 0.2);
-}
-
-/* Terminal Title Bar */
 .cyber-terminal-header {
   background: #0a0a0f;
   border-bottom: 1px solid var(--border-cyber);
@@ -226,10 +194,6 @@ body {
   background: #00ff88;
   box-shadow: 0 0 6px #00ff88;
 }
-
-/* ========================================================= */
-/* BUTTONS (CHAMFERED + NEON)                                */
-/* ========================================================= */
 
 .btn-cyber-primary {
   display: inline-flex;
@@ -342,7 +306,6 @@ body {
   color: var(--accent-primary);
 }
 
-/* Nav Tabs */
 .nav-tab-cyber {
   display: inline-flex;
   align-items: center;
@@ -373,10 +336,6 @@ body {
   border: 1px solid var(--accent-primary);
   box-shadow: 0 0 15px rgba(0, 255, 136, 0.35);
 }
-
-/* ========================================================= */
-/* INPUTS & SELECTS                                          */
-/* ========================================================= */
 
 .cyber-input {
   background: var(--bg-input);
@@ -417,10 +376,6 @@ body {
   box-shadow: 0 0 10px rgba(0, 255, 136, 0.3);
 }
 
-/* ========================================================= */
-/* CHROMATIC ABERRATION & GLITCH                             */
-/* ========================================================= */
-
 .cyber-glitch {
   position: relative;
   text-shadow: -2px 0 #ff00ff, 2px 0 #00d4ff;
@@ -436,19 +391,6 @@ body {
   }
 }
 
-@keyframes glitch {
-  0%, 100% { transform: translate(0); }
-  20% { transform: translate(-2px, 2px); }
-  40% { transform: translate(2px, -2px); }
-  60% { transform: translate(-1px, -1px); }
-  80% { transform: translate(1px, 1px); }
-}
-
-.glitch-active {
-  animation: glitch 0.3s steps(2) infinite;
-}
-
-/* Blinking Cursor */
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
@@ -457,10 +399,6 @@ body {
 .cursor-blink {
   animation: blink 1s step-end infinite;
 }
-
-/* ========================================================= */
-/* STATUS BADGES                                             */
-/* ========================================================= */
 
 .badge-cyber-active {
   display: inline-flex;
@@ -507,24 +445,4 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   box-shadow: 0 0 8px rgba(255, 0, 255, 0.3);
-}
-
-/* Custom Scrollbars */
-::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
-
-::-webkit-scrollbar-track {
-  background: #0a0a0f;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #2a2a3a;
-  border: 1px solid var(--accent-primary);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-primary);
-  box-shadow: 0 0 8px var(--accent-primary);
 }

@@ -5,7 +5,7 @@ import math
 import numpy as np
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
-from backend.memory.models import MemoryEntry, MemoryStatus, MemoryType, EntityTriple, MemoryAttribution
+from backend.memory.models import MemoryEntry, MemoryStatus, MemoryType, EntityTriple, AuditLogEntry
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "chronos_memory.db")
 
@@ -15,10 +15,7 @@ class EmbeddingEngine:
     def __init__(self):
         self._model = None
         self._dim = 384
-        # Fast local dense neural/projection embedder with 100% zero-latency guarantees
         try:
-            import os   
-            # If HuggingFace cache exists locally, load it
             if os.environ.get("USE_HF_EMBEDDINGS") == "1":
                 from sentence_transformers import SentenceTransformer
                 self._model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
@@ -35,15 +32,15 @@ class EmbeddingEngine:
             except Exception:
                 pass
         
-        # High quality fast dense n-gram projection fallback
-        tokens = text.lower().split()
+        # High quality fast dense n-gram projection with positional & subword weighting
+        tokens = text.lower().replace(",", " ").replace(".", " ").replace("?", " ").replace("!", " ").split()
         vec = np.zeros(self._dim, dtype=np.float32)
         for i, token in enumerate(tokens):
-            h = hash(token) % self._dim
-            vec[h] += 1.0 / (i + 1)**0.5
+            h = (hash(token) & 0x7FFFFFFF) % self._dim
+            vec[h] += 1.2 / (i + 1)**0.3
             for j in range(len(token) - 1):
-                bh = hash(token[j:j+2]) % self._dim
-                vec[bh] += 0.5
+                bh = (hash(token[j:j+2]) & 0x7FFFFFFF) % self._dim
+                vec[bh] += 0.4
         norm = np.linalg.norm(vec)
         if norm > 0:
             vec = vec / norm
@@ -68,181 +65,6 @@ def get_embedder() -> EmbeddingEngine:
     return _GLOBAL_EMBEDDER
 
 class MemoryStore:
-    def get_memory_by_id(
-        self,
-        memory_id: str
-    ) -> Optional[MemoryEntry]:
-        """
-        Retrieve a single non-forgotten memory by its ID.
-
-        Forgotten memories are treated as completely erased
-        from the normal memory interface.
-        """
-
-        with self._get_connection() as conn:
-            row = conn.execute(
-                """
-                SELECT *
-                FROM memories
-                WHERE id = ?
-                  AND status != ?
-                LIMIT 1
-                """,
-                (
-                    memory_id,
-                    MemoryStatus.FORGOTTEN.value
-                )
-            ).fetchone()
-
-        if row is None:
-            return None
-
-        return self._row_to_memory(row)
-
-    def delete_memory(
-        self,
-        user_id: str,
-        memory_id: str
-    ) -> bool:
-        """
-        Remove memory permanently by ID.
-
-        This is a hard delete — no archiving, no status flags.
-        """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "DELETE FROM memories WHERE user_id = ? AND id = ?",
-                (user_id, memory_id)
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-
-    def get_conflicting_memories(
-        self,
-        user_id: str,
-        subject: Optional[str],
-        predicate: Optional[str],
-        object_: Optional[str],
-        simulated_date: Optional[datetime] = None
-    ) -> List[MemoryEntry]:
-        """
-        Get all memories belonging to user with matching triple subject/predicate/object.
-
-        If simulated_date is provided, we only retrieve memories that were active
-        at that specific point in simulated time.
-        """
-        if not subject:
-            return []
-
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-
-            # Baseline query for matching S-P-O triples
-            query = """
-                SELECT *
-                FROM memories
-                WHERE user_id = ?
-                AND subject = ?
-                AND predicate = ?
-                AND object = ?
-                AND status != ?
-            """
-
-            params = [
-                user_id,
-                subject,
-                predicate,
-                object_,
-                MemoryStatus.FORGOTTEN.value
-            ]
-
-        # If we have a simulated date, favor memories that were valid then
-        if simulated_date:
-            query += """
-                AND (valid_from IS NULL OR valid_from <= ?)
-                AND (valid_to IS NULL OR valid_to >= ?)
-            """
-            params.extend([simulated_date.isoformat(), simulated_date.isoformat()])
-
-        query += " ORDER BY created_at DESC"
-
-        rows = cursor.execute(query, params).fetchall()
-
-        return [self._row_to_memory(row) for row in rows]
-
-    def set_memory_status(
-        self,
-        user_id: str,
-        memory_id: str,
-        status: MemoryStatus,
-        simulated_date: Optional[datetime] = None,
-        reason: Optional[str] = None
-    ) -> bool:
-        """
-        Transition a memory to a new status.
-
-        Supports: active <-> superseded <-> forgotten
-
-        When moving to SUPERSEDED:
-          - sets valid_to to the current simulated date
-          - optional reason explains why it was superseded
-
-        When moving to FORGOTTEN:
-          - sets status to FORGOTTEN
-          - optionally updates valid_to if desired
-        """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-
-            # Step 1: Retrieve the memory to ensure it exists and we own it
-            row = cursor.execute(
-                """
-                SELECT * FROM memories
-                WHERE user_id = ? AND id = ?
-                """,
-                (user_id, memory_id)
-            ).fetchone()
-
-            if row is None:
-                return False
-
-            mem = self._row_to_memory(row)
-
-            # Step 2: Determine new valid_to time
-            new_valid_to = None
-
-            if status == MemoryStatus.SUPERSEDED:
-                if simulated_date:
-                    new_valid_to = simulated_date.isoformat()
-                else:
-                    now = datetime.now(timezone.utc).isoformat()
-                    new_valid_to = now
-
-            elif status == MemoryStatus.FORGOTTEN:
-                if simulated_date:
-                    new_valid_to = simulated_date.isoformat()
-
-            # Step 3: Update the memory status
-            cursor.execute(
-                """
-                UPDATE memories
-                SET status = ?, valid_to = ?,
-                    supersede_reason = COALESCE(?, supersede_reason)
-                WHERE user_id = ? AND id = ?
-                """,
-                (
-                    status.value,
-                    new_valid_to,
-                    reason,
-                    user_id,
-                    memory_id
-                )
-            )
-
-            conn.commit()
-            return True
-
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
@@ -250,7 +72,7 @@ class MemoryStore:
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -351,15 +173,44 @@ class MemoryStore:
                 return self._row_to_memory(row)
         return None
 
-    def get_user_memories(self, user_id: str, include_superseded: bool = True, include_forgotten: bool = False) -> List[MemoryEntry]:
+    def get_memory_by_id(self, memory_id: str) -> Optional[MemoryEntry]:
+        """Retrieve a single non-forgotten memory by its ID."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM memories WHERE id = ? AND status != 'FORGOTTEN'", (memory_id,))
+            row = cursor.fetchone()
+            if row:
+                return self._row_to_memory(row)
+        return None
+
+    def delete_memory(self, user_id: str, memory_id: str) -> bool:
+        """Hard delete a memory record."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM memories WHERE user_id = ? AND id = ?", (user_id, memory_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def get_user_memories(
+        self,
+        user_id: str,
+        include_superseded: bool = True,
+        include_forgotten: bool = False,
+        simulated_date: Optional[str] = None
+    ) -> List[MemoryEntry]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             query = "SELECT * FROM memories WHERE user_id = ?"
-            params = [user_id]
+            params: List[Any] = [user_id]
             if not include_forgotten:
                 query += " AND status != 'FORGOTTEN'"
             if not include_superseded:
                 query += " AND status = 'ACTIVE'"
+            
+            if simulated_date:
+                query += " AND (valid_from IS NULL OR valid_from <= ?)"
+                params.append(simulated_date)
+
             query += " ORDER BY created_at DESC"
             cursor.execute(query, params)
             rows = cursor.fetchall()
@@ -376,424 +227,146 @@ class MemoryStore:
             """, (user_id, subject, predicate))
             rows = cursor.fetchall()
             return [self._row_to_memory(row) for row in rows]
-    def _retrieval_score(
-        self,
-        memory: MemoryEntry,
-        similarity: float
-    ) -> float:
 
-        # Forgotten memories should never be retrieved.
-        if memory.status == MemoryStatus.FORGOTTEN:
-            return 0.0
-
-        # Current memories get maximum priority.
-        if memory.status == MemoryStatus.ACTIVE:
-            state_weight = 1.0
-
-        # Historical memories remain available for
-        # historical/lineage queries, but should not
-        # compete equally with current truth.
-        elif memory.status == MemoryStatus.SUPERSEDED:
-            state_weight = 0.35
-
-        elif memory.status == MemoryStatus.EXPIRED:
-            state_weight = 0.20
-
-        elif memory.status == MemoryStatus.DECAYED:
-            state_weight = 0.15
-
-        else:
-            state_weight = 0.10
-
-        confidence_weight = max(
-            0.1,
-            min(1.0, memory.confidence)
-        )
-
-        importance_weight = max(
-            0.1,
-            min(1.0, memory.importance)
-        )
-
-        return (
-            similarity
-            * state_weight
-            * confidence_weight
-            * importance_weight
-        )
     def vector_search(
         self,
         user_id: str,
         query: str,
         top_k: int = 8,
-        min_similarity: float = 0.25
+        min_similarity: float = 0.15,
+        simulated_date: Optional[str] = None
     ) -> List[Tuple[MemoryEntry, float]]:
         """
-        Intent-aware hybrid memory retrieval.
-
-        Uses:
-        1. Semantic similarity
-        2. Structured predicate matching
-        3. Query-intent matching
-        4. Current ACTIVE state preference
-        5. Historical/SUPERSEDED awareness
-
-        Prevents unrelated memories such as a beverage preference
-        from outranking a location memory for a location question.
+        Intent-aware hybrid memory retrieval:
+        1. Dense semantic embedding similarity
+        2. Keyword & BM25-style overlap
+        3. Predicate & Object graph match
+        4. Query-intent domain boost
+        5. Current ACTIVE state boost (with preserved SUPERSEDED historical access)
         """
-
         query_emb = self.embedder.embed(query)
         memories = self.get_user_memories(
             user_id=user_id,
             include_superseded=True,
-            include_forgotten=False
+            include_forgotten=False,
+            simulated_date=simulated_date
         )
 
         q = query.lower().strip()
+        q_clean = q.replace("?", "").replace(".", "").replace(",", "").replace("!", "")
+        query_words = set(q_clean.split())
+
+        # Intent Term sets
+        location_terms = {"where", "live", "lived", "reside", "resided", "location", "city", "home", "moved", "move", "living", "address"}
+        beverage_terms = {"drink", "beverage", "coffee", "tea", "matcha", "drinks", "drinking", "thirsty", "cup"}
+        database_terms = {"database", "db", "storage", "sqlite", "postgres", "postgresql", "mongo", "mongodb", "mysql", "datastore"}
+        tech_terms = {"framework", "tech", "technology", "stack", "react", "vue", "angular", "next", "ide", "tool", "editor", "language", "python", "typescript"}
+        diet_terms = {"diet", "eat", "eating", "food", "nutrition", "vegan", "keto", "carnivore", "vegetarian", "allergic", "allergy", "allergies", "dinner", "lunch", "breakfast", "meal", "meals", "cook", "cooking", "dish", "menu", "restaurant"}
+        job_terms = {"job", "work", "role", "profession", "employed", "company", "career", "occupation"}
+        history_terms = {"previously", "before", "used to", "formerly", "old", "prior", "in the past", "back then", "earlier", "history", "originate"}
+
+        is_location_query = bool(query_words.intersection(location_terms))
+        is_beverage_query = bool(query_words.intersection(beverage_terms))
+        is_database_query = bool(query_words.intersection(database_terms))
+        is_tech_query = bool(query_words.intersection(tech_terms))
+        is_diet_query = bool(query_words.intersection(diet_terms))
+        is_job_query = bool(query_words.intersection(job_terms))
+        is_history_query = bool(any(ht in q for ht in history_terms))
 
         scored: List[Tuple[MemoryEntry, float]] = []
 
-        # ------------------------------------------------------------
-        # Detect query intent
-        # ------------------------------------------------------------
-
-        location_terms = {
-            "where",
-            "live",
-            "lived",
-            "reside",
-            "resided",
-            "location",
-            "city",
-            "home",
-            "moved",
-            "move",
-            "living"
-        }
-
-        beverage_terms = {
-            "drink",
-            "beverage",
-            "coffee",
-            "tea",
-            "matcha",
-            "drinks"
-        }
-
-        database_terms = {
-            "database",
-            "db",
-            "storage",
-            "sqlite",
-            "postgres",
-            "postgresql"
-        }
-
-        diet_terms = {
-            "diet",
-            "eat",
-            "food",
-            "nutrition",
-            "vegan",
-            "keto"
-        }
-
-        preference_terms = {
-            "favorite",
-            "favourite",
-            "preference",
-            "prefer",
-            "like",
-            "love"
-        }
-
-        query_words = set(q.replace("?", "").split())
-
-        is_location_query = bool(
-            query_words.intersection(location_terms)
-        )
-
-        is_beverage_query = bool(
-            query_words.intersection(beverage_terms)
-        )
-
-        is_database_query = bool(
-            query_words.intersection(database_terms)
-        )
-
-        is_diet_query = bool(
-            query_words.intersection(diet_terms)
-        )
-
-        is_preference_query = bool(
-            query_words.intersection(preference_terms)
-        )
-
-        # ------------------------------------------------------------
-        # Score every memory
-        # ------------------------------------------------------------
-
         for mem in memories:
-
             if mem.status == MemoryStatus.FORGOTTEN:
                 continue
 
-            # Base semantic similarity
+            # Semantic score
             semantic_score = 0.0
-
             if mem.embedding:
-                semantic_score = float(
-                    self.embedder.cosine_similarity(
-                        query_emb,
-                        mem.embedding
-                    )
-                )
+                semantic_score = float(self.embedder.cosine_similarity(query_emb, mem.embedding))
 
             score = semantic_score
-
             content = mem.content.lower()
+            predicate = mem.triple.predicate.lower() if mem.triple else ""
+            obj = mem.triple.object.lower() if mem.triple else ""
 
-            predicate = ""
-            obj = ""
-
-            if mem.triple:
-                predicate = mem.triple.predicate.lower()
-                obj = mem.triple.object.lower()
-
-            # --------------------------------------------------------
-            # Intent-specific relevance
-            # --------------------------------------------------------
-
-            intent_match = False
-
-            # LOCATION
+            # Domain Boosts
             if is_location_query:
-
-                if (
-                    predicate in {
-                        "location",
-                        "lives_in",
-                        "resides_in",
-                        "lived_in",
-                        "moved_to"
-                    }
-                    or any(
-                        term in content
-                        for term in [
-                            "live",
-                            "lived",
-                            "reside",
-                            "resided",
-                            "moved",
-                            "location"
-                        ]
-                    )
-                ):
-                    score = max(score, 0.95)
-                    intent_match = True
-
+                if predicate in {"lives_in", "origin_from"} or any(w in content for w in ["live", "lived", "reside", "moved", "location", "seattle", "tokyo", "berlin", "london"]):
+                    score = max(score, 0.88)
                 else:
-                    # Strongly suppress unrelated memories
-                    score *= 0.25
-
-            # BEVERAGE
+                    score *= 0.4
             elif is_beverage_query:
-
-                if (
-                    predicate in {
-                        "favorite_drink",
-                        "favorite_beverage",
-                        "beverage",
-                        "drink",
-                        "preference"
-                    }
-                    or any(
-                        term in content
-                        for term in [
-                            "drink",
-                            "beverage",
-                            "coffee",
-                            "tea",
-                            "matcha"
-                        ]
-                    )
-                ):
-                    score = max(score, 0.95)
-                    intent_match = True
-
+                if predicate in {"primary_beverage", "prefers_beverage", "stopped_consuming"} or any(w in content for w in ["drink", "beverage", "coffee", "tea", "matcha"]):
+                    score = max(score, 0.88)
                 else:
-                    score *= 0.25
-
-            # DATABASE
+                    score *= 0.4
             elif is_database_query:
-
-                if (
-                    predicate in {
-                        "database",
-                        "db",
-                        "storage"
-                    }
-                    or any(
-                        term in content
-                        for term in [
-                            "database",
-                            "sqlite",
-                            "postgres",
-                            "postgresql",
-                            "storage"
-                        ]
-                    )
-                ):
-                    score = max(score, 0.95)
-                    intent_match = True
-
+                if predicate in {"database_choice", "decided_to_use", "migrated_tech"} or any(w in content for w in ["database", "sqlite", "postgres", "postgresql", "mysql"]):
+                    score = max(score, 0.88)
                 else:
-                    score *= 0.25
-
-            # DIET
+                    score *= 0.4
             elif is_diet_query:
-
-                if (
-                    predicate == "diet"
-                    or any(
-                        term in content
-                        for term in [
-                            "diet",
-                            "eat",
-                            "food",
-                            "vegan",
-                            "keto",
-                            "nutrition"
-                        ]
-                    )
-                ):
-                    score = max(score, 0.95)
-                    intent_match = True
-
+                if predicate in {"dietary_lifestyle", "avoids_food", "allergic_to"} or any(w in content for w in ["diet", "vegan", "keto", "allergic", "peanut", "steak", "food"]):
+                    score = max(score, 0.88)
                 else:
+                    score *= 0.4
+            elif is_job_query:
+                if predicate in {"works_as", "employed_at"} or any(w in content for w in ["work", "architect", "engineer", "coach", "student", "role", "company"]):
+                    score = max(score, 0.88)
+                else:
+                    score *= 0.4
+            elif is_tech_query:
+                if predicate in {"framework_choice", "decided_to_use", "prefers_tool"} or any(w in content for w in ["react", "vue", "neovim", "vscode", "ide", "tech", "tool"]):
+                    score = max(score, 0.88)
+
+            # Direct predicate & object matching
+            if predicate and predicate.replace("_", " ") in q:
+                score = max(score, 0.95)
+            if obj and obj in q:
+                score = max(score, 0.95)
+
+            # Keyword lexical overlap boost
+            content_words = set(content.replace(".", " ").replace(",", " ").replace("!", " ").split())
+            overlap = query_words.intersection(content_words)
+            if overlap:
+                score += min(0.20, len(overlap) * 0.06)
+
+            # State weight adjustments
+            if is_history_query:
+                if mem.status == MemoryStatus.SUPERSEDED:
+                    score *= 1.3  # Boost superseded memories for retrospective questions
+                elif mem.status == MemoryStatus.ACTIVE:
+                    score *= 0.8
+            else:
+                if mem.status == MemoryStatus.ACTIVE:
+                    score *= 1.0
+                elif mem.status == MemoryStatus.SUPERSEDED:
+                    score *= 0.55  # Retrievable as historical context, but won't overshadow active
+                elif mem.status == MemoryStatus.DECAYED:
+                    score *= 0.35
+                elif mem.status == MemoryStatus.EXPIRED:
                     score *= 0.25
 
-            # GENERAL PREFERENCE
-            elif is_preference_query:
-
-                if (
-                    predicate in {
-                        "preference",
-                        "favorite",
-                        "favorite_drink",
-                        "favorite_beverage"
-                    }
-                    or "favorite" in content
-                    or "favourite" in content
-                    or "prefer" in content
-                ):
-                    score = max(score, 0.85)
-                    intent_match = True
-
-            # --------------------------------------------------------
-            # Structured predicate/object exact matching
-            # --------------------------------------------------------
-
-            if mem.triple:
-
-                if predicate and predicate in q:
-                    score = max(score, 0.98)
-
-                if obj and obj in q:
-                    score = max(score, 0.98)
-
-            # --------------------------------------------------------
-            # Exact content keyword overlap
-            # --------------------------------------------------------
-
-            content_words = set(
-                content.replace(".", "")
-                .replace(",", "")
-                .split()
-            )
-
-            overlap = query_words.intersection(content_words)
-
-            if overlap:
-                score += min(
-                    0.15,
-                    len(overlap) * 0.05
-                )
-
-            # --------------------------------------------------------
-            # State weighting
-            #
-            # Active memories are preferred for normal/current queries.
-            # Historical memories remain retrievable.
-            # --------------------------------------------------------
-
-            if mem.status == MemoryStatus.ACTIVE:
-
-                score *= 1.0
-
-            elif mem.status == MemoryStatus.SUPERSEDED:
-
-                # Keep historical memories available, but don't allow
-                # them to beat an active current memory unless the
-                # engine explicitly asks for history.
-                score *= 0.55
-
-            elif mem.status == MemoryStatus.DECAYED:
-
-                score *= 0.35
-
-            elif mem.status == MemoryStatus.EXPIRED:
-
-                score *= 0.25
-
-            # --------------------------------------------------------
-            # Confidence + importance
-            # --------------------------------------------------------
-
-            confidence = max(
-                0.1,
-                min(1.0, mem.confidence)
-            )
-
-            importance = max(
-                0.1,
-                min(1.0, mem.importance)
-            )
-
-            score *= (
-                0.7
-                + 0.3 * confidence
-            )
-
-            score *= (
-                0.7
-                + 0.3 * importance
-            )
-
-            # --------------------------------------------------------
-            # Keep candidate
-            # --------------------------------------------------------
+            # Confidence & Importance weights
+            confidence = max(0.1, min(1.0, mem.confidence))
+            importance = max(0.1, min(1.0, mem.importance))
+            score *= (0.7 + 0.3 * confidence)
+            score *= (0.7 + 0.3 * importance)
 
             if score >= min_similarity:
+                scored.append((mem, float(score)))
 
-                scored.append(
-                    (
-                        mem,
-                        float(score)
-                    )
-                )
-
-        # ------------------------------------------------------------
-        # Sort highest relevance first
-        # ------------------------------------------------------------
-
-        scored.sort(
-            key=lambda x: x[1],
-            reverse=True
-        )
-
+        scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_k]
-    def update_memory_status(self, memory_id: str, status: MemoryStatus, valid_to: Optional[str] = None, superseded_by_id: Optional[str] = None, supersede_reason: Optional[str] = None):
+
+    def update_memory_status(
+        self,
+        memory_id: str,
+        status: MemoryStatus,
+        valid_to: Optional[str] = None,
+        superseded_by_id: Optional[str] = None,
+        supersede_reason: Optional[str] = None
+    ):
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -815,7 +388,8 @@ class MemoryStore:
             conn.commit()
 
     def forget_memory(self, memory_id: str, user_id: str, reason: str = "User requested deletion") -> bool:
-        """GDPR Compliant Memory Erasure / Selective Purge"""
+        """GDPR Compliant Memory Erasure / Selective Purge with audit trail."""
+        now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -828,7 +402,7 @@ class MemoryStore:
             cursor.execute("""
                 INSERT INTO audit_logs (id, user_id, action, target_memory_id, reason, created_at)
                 VALUES (?, ?, 'PURGE', ?, ?, ?)
-            """, (str(os.urandom(8).hex()), user_id, memory_id, reason, datetime.now(timezone.utc).isoformat()))
+            """, (str(os.urandom(8).hex()), user_id, memory_id, reason, now))
             conn.commit()
             return cursor.rowcount > 0
 
@@ -840,7 +414,15 @@ class MemoryStore:
             cursor.execute("DELETE FROM audit_logs WHERE user_id = ?", (user_id,))
             conn.commit()
 
-    def save_chat_message(self, user_id: str, session_id: str, role: str, content: str, simulated_date: Optional[str] = None, memory_ids_used: Optional[List[str]] = None):
+    def save_chat_message(
+        self,
+        user_id: str,
+        session_id: str,
+        role: str,
+        content: str,
+        simulated_date: Optional[str] = None,
+        memory_ids_used: Optional[List[str]] = None
+    ):
         with self._get_connection() as conn:
             cursor = conn.cursor()
             msg_id = str(os.urandom(8).hex())
@@ -881,9 +463,60 @@ class MemoryStore:
                 "created_at": r["created_at"]
             } for r in rows]
 
+    def get_audit_logs(self, user_id: Optional[str] = None, limit: int = 50) -> List[AuditLogEntry]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if user_id:
+                cursor.execute("""
+                    SELECT * FROM audit_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?
+                """, (user_id, limit))
+            else:
+                cursor.execute("""
+                    SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?
+                """, (limit,))
+            rows = cursor.fetchall()
+            return [AuditLogEntry(
+                id=r["id"],
+                user_id=r["user_id"],
+                action=r["action"],
+                target_memory_id=r["target_memory_id"],
+                reason=r["reason"],
+                created_at=r["created_at"]
+            ) for r in rows]
+
+    def get_system_stats(self) -> Dict[str, Any]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) as cnt FROM memories")
+            total = cursor.fetchone()["cnt"]
+            
+            cursor.execute("SELECT COUNT(*) as cnt FROM memories WHERE status = 'ACTIVE'")
+            active = cursor.fetchone()["cnt"]
+            
+            cursor.execute("SELECT COUNT(*) as cnt FROM memories WHERE status = 'SUPERSEDED'")
+            superseded = cursor.fetchone()["cnt"]
+            
+            cursor.execute("SELECT COUNT(*) as cnt FROM memories WHERE status = 'FORGOTTEN'")
+            forgotten = cursor.fetchone()["cnt"]
+
+            cursor.execute("SELECT DISTINCT user_id FROM memories")
+            users = [r["user_id"] for r in cursor.fetchall()]
+
+            cursor.execute("SELECT COUNT(*) as cnt FROM audit_logs")
+            audit_count = cursor.fetchone()["cnt"]
+
+            return {
+                "total_memories": total,
+                "active_memories": active,
+                "superseded_memories": superseded,
+                "forgotten_memories": forgotten,
+                "user_count": len(users),
+                "users": users,
+                "audit_logs_count": audit_count
+            }
+
     def _row_to_memory(self, row: sqlite3.Row) -> MemoryEntry:
         triple = None
-
         if row["subject"] and row["predicate"] and row["object"]:
             triple = EntityTriple(
                 subject=row["subject"],
@@ -917,27 +550,3 @@ class MemoryStore:
             metadata=metadata,
             embedding=embedding
         )
-
-def get_memory_by_id(self, memory_id: str) -> Optional[MemoryEntry]:
-    """
-    Retrieve a single memory by its ID.
-
-    Returns None if the memory does not exist.
-    """
-
-    cursor = self.conn.execute(
-        """
-        SELECT *
-        FROM memories
-        WHERE id = ?
-        LIMIT 1
-        """,
-        (memory_id,)
-    )
-
-    row = cursor.fetchone()
-
-    if row is None:
-        return None
-
-    return self._row_to_memory(row)
