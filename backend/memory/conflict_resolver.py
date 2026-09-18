@@ -21,20 +21,28 @@ class ConflictResolver:
     def __init__(self, store: MemoryStore):
         self.store = store
 
-    def resolve_conflicts_for_new_memory(self, new_memory: MemoryEntry, simulated_date: Optional[str] = None) -> List[Dict[str, Any]]:
+    def resolve_conflicts_for_new_memory(
+        self,
+        new_memory: MemoryEntry,
+        simulated_date: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
         Inspects existing active memories for the user.
+
         If a contradiction or state update is found:
         - Marks old memory as SUPERSEDED.
         - Sets valid_to timestamp.
         - Links superseded_by_id to new_memory.id.
         - Records human-readable supersede_reason.
+
         Returns a list of conflict resolution event logs.
         """
+
         resolution_logs = []
         user_id = new_memory.user_id
-        
-        # If new memory has no triple, check semantic similarity to find direct overwrites
+
+        # If new memory has no triple, check semantic similarity
+        # to find direct overwrites.
         if not new_memory.triple:
             return self._resolve_by_semantic_similarity(new_memory)
 
@@ -42,28 +50,74 @@ class ConflictResolver:
         predicate = new_memory.triple.predicate
         new_obj = new_memory.triple.object
 
-        # Find existing active memories with matching subject & predicate
-        existing_memories = self.store.find_memories_by_triple(user_id, subject, predicate)
-        active_candidates = [m for m in existing_memories if m.status == MemoryStatus.ACTIVE and m.id != new_memory.id]
+        # Find existing memories with matching subject & predicate.
+        existing_memories = self.store.find_memories_by_triple(
+            user_id,
+            subject,
+            predicate
+        )
 
-        is_mutually_exclusive = predicate in self.MUTUALLY_EXCLUSIVE_PREDICATES or self._is_opposing_values(predicate, new_obj)
+        active_candidates = [
+            m for m in existing_memories
+            if m.status == MemoryStatus.ACTIVE
+            and m.id != new_memory.id
+        ]
+
+        is_mutually_exclusive = (
+            predicate in self.MUTUALLY_EXCLUSIVE_PREDICATES
+            or self._is_opposing_values(predicate, new_obj)
+        )
 
         for old_mem in active_candidates:
             old_obj = old_mem.triple.object if old_mem.triple else ""
-            
-            # If the value is the same, just reinforce/touch the old memory
+
+            # Same value = duplicate confirmation.
             if old_obj.lower().strip() == new_obj.lower().strip():
+                self.store.update_memory_status(
+                    memory_id=new_memory.id,
+                    status=MemoryStatus.SUPERSEDED,
+                    valid_to=simulated_date or new_memory.valid_from,
+                    superseded_by_id=old_mem.id,
+                    supersede_reason=(
+                        "Duplicate confirmation of existing active memory"
+                    )
+                )
+
                 self.store.touch_memory(old_mem.id)
+
+                resolution_logs.append({
+                    "type": "DUPLICATE_CONFIRMED",
+                    "existing_memory_id": old_mem.id,
+                    "duplicate_memory_id": new_memory.id,
+                    "reason": "New statement confirms the existing value."
+                })
+
                 continue
 
-            if is_mutually_exclusive or self._is_direct_override(old_mem.content, new_memory.content):
-                # We have a contradiction / update!
-                valid_to = simulated_date or new_memory.valid_from or datetime.now(timezone.utc).isoformat()
-                reason = f"Updated '{predicate.replace('_', ' ')}' from '{old_obj}' to '{new_obj}'"
+            # Different value for a mutually exclusive predicate,
+            # or an explicitly detected override.
+            if (
+                is_mutually_exclusive
+                or self._is_direct_override(
+                    old_mem.content,
+                    new_memory.content
+                )
+            ):
+                valid_to = (
+                    simulated_date
+                    or new_memory.valid_from
+                    or datetime.now(timezone.utc).isoformat()
+                )
+
+                reason = (
+                    f"Updated '{predicate.replace('_', ' ')}' "
+                    f"from '{old_obj}' to '{new_obj}'"
+                )
+
                 if simulated_date:
                     reason += f" on {simulated_date}"
 
-                # Mark old memory as SUPERSEDED
+                # Mark old memory as SUPERSEDED.
                 self.store.update_memory_status(
                     memory_id=old_mem.id,
                     status=MemoryStatus.SUPERSEDED,
@@ -72,20 +126,12 @@ class ConflictResolver:
                     supersede_reason=reason
                 )
 
-                log_entry = {
-                    "type": "STATE_SUPERSEDED",
-                    "predicate": predicate,
+                resolution_logs.append({
+                    "type": "MEMORY_SUPERSEDED",
                     "old_memory_id": old_mem.id,
-                    "old_value": old_obj,
                     "new_memory_id": new_memory.id,
-                    "new_value": new_obj,
-                    "reason": reason,
-                    "timestamp": valid_to
-                }
-                resolution_logs.append(log_entry)
-
-        # Handle explicit reversal phrases (e.g. "I quit coffee", "I stopped using MongoDB")
-        resolution_logs.extend(self._handle_explicit_reversals(new_memory, simulated_date))
+                    "reason": reason
+                })
 
         return resolution_logs
 

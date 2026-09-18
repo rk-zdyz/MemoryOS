@@ -106,3 +106,152 @@ def test_knowledge_graph_structure(engine):
     # Check for evolution edge
     evolution_edges = [e for e in graph["edges"] if e.get("status") == "EVOLUTION"]
     assert len(evolution_edges) >= 1
+def test_current_memory_beats_superseded_memory(engine):
+    """
+    The latest active fact must outrank an older superseded
+    fact even when the older fact has strong semantic similarity.
+    """
+
+    # Day 1
+    engine.process_chat(
+        ChatRequest(
+            user_id="riku",
+            session_id="day1",
+            message="I live in Seattle.",
+            simulated_date="2026-09-01T10:00:00Z"
+        )
+    )
+
+    # Day 3
+    engine.process_chat(
+        ChatRequest(
+            user_id="riku",
+            session_id="day3",
+            message="I moved to Tokyo.",
+            simulated_date="2026-09-03T10:00:00Z"
+        )
+    )
+
+    # Ask current-state question
+    response = engine.process_chat(
+        ChatRequest(
+            user_id="riku",
+            session_id="day4",
+            message="Where do I currently live?"
+        )
+    )
+
+    # Current answer must contain Tokyo.
+    assert "Tokyo" in response.answer
+
+    # Tokyo must be an active memory.
+    assert any(
+        "Tokyo" in memory.content
+        and memory.is_active
+        for memory in response.used_memories
+    )
+
+    # Seattle must NOT be treated as current truth.
+    assert not any(
+        "Seattle" in memory.content
+        and memory.is_active
+        for memory in response.used_memories
+    )
+
+def test_active_memory_beats_superseded_memory_in_retrieval(engine):
+    # Day 1: old location
+    engine.process_chat(ChatRequest(
+        user_id="retrieval_test",
+        session_id="day1",
+        message="I live in Seattle.",
+        simulated_date="2026-09-01T10:00:00Z"
+    ))
+
+    # Day 3: new location
+    engine.process_chat(ChatRequest(
+        user_id="retrieval_test",
+        session_id="day3",
+        message="I moved to Tokyo.",
+        simulated_date="2026-09-03T10:00:00Z"
+    ))
+
+    # Search for the current location.
+    results = engine.store.vector_search(
+        user_id="retrieval_test",
+        query="Where do I live?",
+        top_k=5,
+        min_similarity=0.15
+    )
+
+    assert len(results) >= 2
+
+    # The highest-ranked result should be the current memory.
+    top_memory = results[0][0]
+
+    assert top_memory.status == MemoryStatus.ACTIVE
+    assert "Tokyo" in top_memory.content
+
+def test_historical_query_retrieves_superseded_memory(engine):
+    engine.process_chat(ChatRequest(
+        user_id="history_test",
+        session_id="day1",
+        message="I live in Seattle.",
+        simulated_date="2026-09-01T10:00:00Z"
+    ))
+
+    engine.process_chat(ChatRequest(
+        user_id="history_test",
+        session_id="day3",
+        message="I moved to Tokyo.",
+        simulated_date="2026-09-03T10:00:00Z"
+    ))
+
+    results = engine.store.vector_search(
+        user_id="history_test",
+        query="Where did I live before Tokyo?",
+        top_k=5,
+        min_similarity=0.15
+    )
+
+    assert len(results) >= 1
+
+    historical = [
+        memory for memory, score in results
+        if "Seattle" in memory.content
+    ]
+
+    assert len(historical) >= 1
+
+def test_forget_command_removes_memory_completely(engine):
+    # Add memory
+    r = engine.process_chat(ChatRequest(
+        user_id="forget_test",
+        session_id="add",
+        message="I have a dog named Fido.",
+        simulated_date="2026-09-01T10:00:00Z"
+    ))
+
+    mem_id = r.new_memories_extracted[0].id
+
+    # Verify exists
+    mem_before = engine.store.get_memory_by_id(mem_id)
+    assert mem_before is not None
+
+    # Forget it
+    engine.process_chat(ChatRequest(
+        user_id="forget_test",
+        session_id="forget",
+        message="Forget my dog Fido.",
+        simulated_date="2026-09-02T10:00:00Z"
+    ))
+
+    # Verify completely gone
+    mem_after = engine.store.get_memory_by_id(mem_id)
+    assert mem_after is None
+
+    # Verify no longer in active or superseded
+    active = engine.store.get_user_memories("forget_test", include_superseded=False)
+    superseded = engine.store.get_user_memories("forget_test", include_superseded=True)
+
+    assert not any(mem.id == mem_id for mem in active)
+    assert not any(mem.id == mem_id for mem in superseded)

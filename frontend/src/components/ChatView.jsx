@@ -95,7 +95,8 @@ export default function ChatView({
               {quickPrompts.slice(0, 3).map((qp, i) => (
                 <button
                   key={i}
-                  onClick={() => onSendMessage(qp.text)}
+                  onClick={() => !isLoading && onSendMessage(qp.text)}
+                  disabled={isLoading}
                   className="btn-secondary"
                   style={{ fontSize: '0.75rem', padding: '5px 10px' }}
                 >
@@ -280,7 +281,8 @@ export default function ChatView({
         {quickPrompts.map((qp, i) => (
           <button
             key={i}
-            onClick={() => onSendMessage(qp.text)}
+            onClick={() => !isLoading && onSendMessage(qp.text)}
+            disabled={isLoading}
             className="btn-secondary"
             style={{ fontSize: '0.72rem', padding: '4px 8px', whiteSpace: 'nowrap', borderRadius: '12px' }}
           >

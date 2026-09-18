@@ -74,48 +74,89 @@ export default function App() {
   };
 
   const handleSendMessage = async (text) => {
-    setIsLoading(true);
-    const newMsg = {
-      role: 'user',
-      content: text,
-      simulated_date: simulatedDate,
-      created_at: new Date().toISOString()
+  if (isLoading || !text?.trim()) return;
+
+  setIsLoading(true);
+
+  const messageText = text.trim();
+
+  // Immediately add the exact message the user clicked/typed.
+  const newMsg = {
+    role: 'user',
+    content: messageText,
+    simulated_date: simulatedDate,
+    created_at: new Date().toISOString(),
+    used_memories: [],
+    superseded_memories: [],
+    conflict_notes: []
+  };
+
+  setMessages(prev => [...prev, newMsg]);
+
+  try {
+    const res = await sendChatMessage(
+      activeUser,
+      `session_${activeUser}`,
+      messageText,
+      simulatedDate,
+      provider,
+      apiKey
+    );
+
+    const assistantMsg = {
+      role: 'assistant',
+      content: res.answer,
+      simulated_date: res.simulated_date,
+      created_at: new Date().toISOString(),
+      used_memories: res.used_memories || [],
+      superseded_memories: res.superseded_memories || [],
+      conflict_notes: res.conflict_resolution_notes || []
     };
-    setMessages(prev => [...prev, newMsg]);
 
+    // Add ONLY the new assistant response.
+    // Do NOT reload conversation history here.
+    setMessages(prev => [...prev, assistantMsg]);
+
+    // Refresh memory/graph/timeline data WITHOUT touching messages.
     try {
-      const res = await sendChatMessage(
-        activeUser,
-        `session_${activeUser}`,
-        text,
-        simulatedDate,
-        provider,
-        apiKey
+      const [memsRes, graphRes, timelineRes, usersRes] =
+        await Promise.all([
+          getMemories(activeUser, true, true),
+          getKnowledgeGraph(activeUser),
+          getTimeline(activeUser),
+          getUsersList()
+        ]);
+
+      setMemories(memsRes.memories || []);
+      setGraphData(graphRes || { nodes: [], edges: [] });
+      setTimelineEvents(timelineRes.events || []);
+      setUsersList(usersRes.users || []);
+    } catch (refreshErr) {
+      console.error(
+        "Failed to refresh memory data:",
+        refreshErr
       );
+    }
 
-      const assistantMsg = {
-        role: 'assistant',
-        content: res.answer,
-        simulated_date: res.simulated_date,
-        created_at: new Date().toISOString(),
-        used_memories: res.used_memories || [],
-        superseded_memories: res.superseded_memories || [],
-        conflict_notes: res.conflict_resolution_notes || []
-      };
+  } catch (err) {
 
-      setMessages(prev => [...prev, assistantMsg]);
-      // Refresh memory stores and graph
-      await loadUserData(activeUser);
-    } catch (err) {
-      setMessages(prev => [...prev, {
+    setMessages(prev => [
+      ...prev,
+      {
         role: 'assistant',
         content: `Error communicating with memory engine: ${err.message}`,
-        created_at: new Date().toISOString()
-      }]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+        created_at: new Date().toISOString(),
+        used_memories: [],
+        superseded_memories: [],
+        conflict_notes: []
+      }
+    ]);
+
+  } finally {
+
+    setIsLoading(false);
+  }
+};
 
   const handleForgetMemory = async (memoryId) => {
     try {
