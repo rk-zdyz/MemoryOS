@@ -344,35 +344,61 @@ class ChronosMemoryEngine:
             return "I don't have any superseded historical memories regarding that."
 
         # 3. Location Queries
-        if any(w in q for w in ["where do i live", "where am i living", "where is my home", "where do you think i live", "where do i currently live", "where am i located", "where's my home", "what city"]):
+        if any(w in q for w in [
+            "where do i live", "where am i living", "where is my home", "where do you think i live",
+            "where do i currently live", "where am i located", "where's my home", "what city", "which city",
+            "where do i stay", "where am i staying", "where do i reside", "where am i", "what is my location",
+            "my current city", "my address", "where's my apartment", "where is my apartment", "where's my place"
+        ]):
             loc_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["lives_in", "origin_from"]]
             if loc_mems:
                 return f"Based on my memory, you live in **{loc_mems[0].triple.object}**."
             return "I don't have a recorded current location for you."
 
-        # 4. Beverage / Drink Preference
-        if any(w in q for w in ["favorite beverage", "favourite beverage", "favorite drink", "favourite drink", "what do i drink", "what beverage", "which drink", "coffee", "matcha", "tea"]):
+        # 4. Identity / Name
+        if any(w in q for w in ["what is my name", "what's my name", "whats my name", "who am i", "do you know my name"]):
+            name_mems = [m for m in active_mems if m.triple and m.triple.predicate == "has_name"]
+            if name_mems:
+                return f"Based on my memory, your name is **{name_mems[0].triple.object}**."
+            return "I don't have your name recorded yet."
+
+        # 5. Beverage / Drink Preference
+        if any(w in q for w in [
+            "favorite beverage", "favourite beverage", "favorite drink", "favourite drink",
+            "what do i drink", "what beverage", "which drink", "what drink", "coffee", "matcha", "tea",
+            "what is my drink", "my preferred drink", "my preferred beverage"
+        ]):
             bev_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["primary_beverage", "prefers_beverage"]]
             if bev_mems:
                 return f"Based on my memory, your preferred beverage is **{bev_mems[0].triple.object}**."
             return "I don't have a recorded beverage preference for you."
 
-        # 5. Database Choice
-        if any(w in q for w in ["what database", "which database", "database did we", "database are we", "database do we use", "what db", "which db"]):
+        # 6. Database Choice
+        if any(w in q for w in [
+            "what database", "which database", "database did we", "database are we",
+            "database do we use", "what db", "which db", "our db", "our database", "database choice"
+        ]):
             db_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["database_choice", "decided_to_use", "migrated_tech"]]
             if db_mems:
                 return f"Based on my memory, we chose **{db_mems[0].triple.object}** as the database."
             return "I don't have a recorded database decision for the project."
 
-        # 6. Technology Stack / Framework / IDE Tool
-        if any(w in q for w in ["what framework", "which framework", "what technology", "what stack", "what ide", "favorite ide", "what tool"]):
+        # 7. Technology Stack / Framework / IDE Tool
+        if any(w in q for w in [
+            "what framework", "which framework", "what technology", "what stack", "what ide",
+            "favorite ide", "what tool", "what do i code in", "my editor", "my ide", "which editor", "which tool"
+        ]):
             tech_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["framework_choice", "prefers_tool", "decided_to_use"]]
             if tech_mems:
                 return f"Based on my memory, you use **{tech_mems[0].triple.object}**."
             return "I don't have a recorded technology choice for that."
 
-        # 7. Diet / Health / Food / Allergies / Dinner / Meals
-        if any(w in q for w in ["what is my diet", "what do i eat", "what can i eat", "what should i eat", "what should i have for dinner", "what to eat", "dinner", "lunch", "breakfast", "meal", "food", "am i vegan", "what is my current diet", "diet", "allergic", "allergy", "allergies"]):
+        # 8. Diet / Health / Food / Allergies / Dinner / Meals
+        if any(w in q for w in [
+            "what is my diet", "what do i eat", "what can i eat", "what should i eat",
+            "what should i have for dinner", "what to eat", "dinner", "lunch", "breakfast", "meal",
+            "food", "am i vegan", "what is my current diet", "diet", "allergic", "allergy", "allergies", "what diet"
+        ]):
             diet_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["dietary_lifestyle", "avoids_food", "allergic_to"]]
             if diet_mems:
                 lifestyle_mem = next((m for m in diet_mems if m.triple.predicate == "dietary_lifestyle"), None)
@@ -391,28 +417,34 @@ class ChronosMemoryEngine:
                 return f"Based on my memory, your dietary information is: {', '.join(facts)}."
             return "I don't have your dietary or allergy information recorded yet."
 
-        # 8. Profession / Role / Company
-        if any(w in q for w in ["what is my job", "what do i do", "where do i work", "what is my role", "what's my role", "what profession", "what do i work as"]):
+        # 9. Profession / Role / Company
+        if any(w in q for w in [
+            "what is my job", "what do i do", "where do i work", "what is my role", "what's my role",
+            "what profession", "what do i work as", "where am i working", "what company", "who do i work for"
+        ]):
             job_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["works_as", "employed_at", "studies_at"]]
             if job_mems:
                 return f"Based on my memory, you are associated with **{job_mems[0].triple.object}**."
             return "I don't have your current job or role recorded yet."
 
-        # 9. Contact / Phone / Email
-        if any(w in q for w in ["what is my phone", "what is my number", "what's my phone", "what is my email", "how to contact"]):
+        # 10. Contact / Phone / Email
+        if any(w in q for w in [
+            "what is my phone", "what is my number", "what's my phone", "what's my number",
+            "what is my email", "what's my email", "how to contact", "my contact info", "my phone", "my email"
+        ]):
             contact_mems = [m for m in active_mems if m.triple and m.triple.predicate in ["has_phone", "has_email"]]
             if contact_mems:
                 return f"Based on my memory, your contact detail is **{contact_mems[0].triple.object}**."
             return "I don't have your contact information recorded."
 
-        # 10. Confidential Project
+        # 11. Confidential Project
         if any(w in q for w in ["secret project", "confidential project"]):
             proj_mems = [m for m in active_mems if m.triple and m.triple.predicate == "confidential_project"]
             if proj_mems:
                 return f"Based on my memory, your confidential project is codenamed **{proj_mems[0].triple.object}**."
             return "I don't have any confidential project recorded for you."
 
-        # 11. General Matching: If active memories exist with high relevance to question words
+        # 12. General Matching: If active memories exist with high relevance to question words
         if active_mems:
             top_mem = active_mems[0]
             if top_mem.triple:

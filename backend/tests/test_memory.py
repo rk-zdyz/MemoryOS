@@ -189,3 +189,37 @@ def test_system_stats(engine):
     stats = engine.store.get_system_stats()
     assert stats["total_memories"] >= 1
     assert "riku" in stats["users"]
+
+def test_natural_language_variations(engine):
+    # 1. Informal location: "i live in vegas"
+    r1 = engine.process_chat(ChatRequest(user_id="alice", message="i live in vegas"))
+    assert len(r1.new_memories_extracted) == 1
+    assert r1.new_memories_extracted[0].triple.predicate == "lives_in"
+    assert r1.new_memories_extracted[0].triple.object.lower() == "vegas"
+
+    # Query location naturally
+    q1 = engine.process_chat(ChatRequest(user_id="alice", message="where do i live?"))
+    assert "vegas" in q1.answer.lower()
+
+    # 2. Relocation with "stay in London"
+    r2 = engine.process_chat(ChatRequest(user_id="alice", message="I stay in London now."))
+    assert len(r2.conflict_resolution_notes) > 0
+    assert r2.new_memories_extracted[0].triple.object.lower() == "london"
+
+    q2 = engine.process_chat(ChatRequest(user_id="alice", message="where am i?"))
+    assert "london" in q2.answer.lower()
+
+    # 3. Beverage: "i drink matcha"
+    r3 = engine.process_chat(ChatRequest(user_id="alice", message="i drink matcha"))
+    assert r3.new_memories_extracted[0].triple.predicate == "primary_beverage"
+    assert r3.new_memories_extracted[0].triple.object.lower() == "matcha"
+
+    # 4. Tech choice: "we use postgres"
+    r4 = engine.process_chat(ChatRequest(user_id="alice", message="we use postgres"))
+    assert r4.new_memories_extracted[0].triple.predicate == "database_choice"
+    assert r4.new_memories_extracted[0].triple.object.lower() == "postgres"
+
+    # 5. Diet: "i am vegan"
+    r5 = engine.process_chat(ChatRequest(user_id="alice", message="i am vegan"))
+    assert r5.new_memories_extracted[0].triple.predicate == "dietary_lifestyle"
+    assert "vegan" in r5.new_memories_extracted[0].triple.object.lower()

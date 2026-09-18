@@ -5,45 +5,155 @@ from backend.memory.models import MemoryEntry, MemoryType, MemoryStatus, EntityT
 
 class MemoryExtractor:
     def __init__(self):
-        # High precision semantic regex patterns for structured memory capture
+        # High-coverage semantic regex patterns for structured memory capture
         self.fact_patterns = [
             # Location & Residence
-            (r"(?:i live in|i am living in|i moved to|i currently reside in|my home is in|i moved into|my apartment is in)\s+([A-Za-z\s,]+?)(?:\s+(?:last|this|next|since|for)\s+.*|\.|$)", "lives_in", MemoryType.PROFILE_FACT),
-            (r"(?:i am from|i'm from|i grew up in)\s+([A-Za-z\s,]+?)(?:\.|$)", "origin_from", MemoryType.PROFILE_FACT),
+            (
+                r"(?:i(?:\s+currently|\s+now)?\s+(?:live|reside|stay|dwell)(?:\s+in|\s+at)?|"
+                r"i(?:\'?m| am)\s+(?:currently\s+|now\s+)?(?:living|residing|staying|based|located|settled)(?:\s+in|\s+at)?|"
+                r"i(?:\s+just|\s+recently)?\s+(?:moved|relocated)(?:\s+to|\s+into)?|"
+                r"my\s+(?:home|apartment|house|place|residence|city|location)\s+is(?:\s+in)?|"
+                r"i(?:\'?m| am)\s+(?:currently\s+|now\s+)?in)\s+([A-Za-z\s,]+?)(?:\s+(?:now|currently|right now|lately|recently|today|last\s+\w+|this\s+\w+|since\s+\w+|for\s+\w+)|\.|\!|\?|$)",
+                "lives_in",
+                MemoryType.PROFILE_FACT
+            ),
+            (
+                r"(?:i(?:\'?m| am)\s+from|i(?:\'?m| am)\s+originally\s+from|i\s+grew\s+up\s+in|my\s+hometown\s+is)\s+([A-Za-z\s,]+?)(?:\.|\!|\?|$)",
+                "origin_from",
+                MemoryType.PROFILE_FACT
+            ),
             
-            # Profession & Role & Company
-            (r"(?:i work as a|i am a|i'm a|my job is|my role is|i work as an)\s+([A-Za-z\s]+?)(?:\s+at|\s+for|\.|$)", "works_as", MemoryType.PROFILE_FACT),
-            (r"(?:i work at|i am employed by|my company is|i joined)\s+([A-Za-z0-9\s]+?)(?:\.|$)", "employed_at", MemoryType.PROFILE_FACT),
-            (r"(?:i study|i am a student at|i study computer science at)\s+([A-Za-z0-9\s]+?)(?:\.|$)", "studies_at", MemoryType.PROFILE_FACT),
+            # Profession & Role & Company & Education
+            (
+                r"(?:i(?:\s+currently)?\s+work\s+as\s+(?:a|an)|i(?:\'?m| am)\s+(?:a|an|currently\s+a|currently\s+an)|my\s+job\s+is(?:\s+a|\s+an)?|my\s+role\s+is(?:\s+a|\s+an)?|my\s+title\s+is(?:\s+a|\s+an)?|my\s+profession\s+is(?:\s+a|\s+an)?)\s+([A-Za-z\s]+?)(?:\s+(?:at|for|in|with)\s+[A-Za-z0-9\s]+|\.|\!|\?|$)",
+                "works_as",
+                MemoryType.PROFILE_FACT
+            ),
+            (
+                r"(?:i(?:\s+currently)?\s+work\s+(?:at|for|with)|i(?:\'?m| am)\s+(?:employed\s+by|working\s+at|working\s+for|at)|my\s+company\s+is|i(?:\s+just|\s+recently)?\s+joined)\s+([A-Za-z0-9\s]+?)(?:\.|\!|\?|$)",
+                "employed_at",
+                MemoryType.PROFILE_FACT
+            ),
+            (
+                r"(?:i(?:\s+currently)?\s+study|i(?:\'?m| am)\s+a\s+student\s+at|i(?:\'?m| am)\s+studying(?:\s+[A-Za-z\s]+)?\s+at)\s+([A-Za-z0-9\s]+?)(?:\.|\!|\?|$)",
+                "studies_at",
+                MemoryType.PROFILE_FACT
+            ),
 
             # Diet, Health & Allergies
-            (r"(?:i am allergic to|i have an allergy to|i'm severely allergic to)\s+([A-Za-z0-9\s]+?)(?:\.|$)", "allergic_to", MemoryType.PROFILE_FACT),
-            (r"(?:i follow a|i am on a|i adhere to a|i follow|i am a|i am now a|i turned|i am now|i am strictly|i am strictly a|i switched to a|i eat a|i eat|i became a|i went)\s+(strict vegan|strictly vegan|vegan|strictly vegetarian|vegetarian|pescatarian|heavy keto carnivore|keto carnivore|strict keto|keto|carnivore|paleo|mediterranean)(?:\s+diet)?(?:\s+now)?", "dietary_lifestyle", MemoryType.PROFILE_FACT),
-            (r"(?:i gave up\s+[A-Za-z0-9\s]+?\s+and\s+am\s+)(strictly vegan|vegan|vegetarian|strictly vegetarian|pescatarian|keto|carnivore)(?:\s+now)?", "dietary_lifestyle", MemoryType.PROFILE_FACT),
-            (r"(?:i don't eat|i quit eating|i avoid eating|i cannot eat|i no longer eat)\s+([A-Za-z0-9\s]+?)(?:\.|$)", "avoids_food", MemoryType.PREFERENCE),
+            (
+                r"(?:i\s+gave\s+up\s+([A-Za-z0-9\s]+?)\s+and\s+(?:am|i\'m|became|switched\s+to)\s+)(strictly\s+vegan|strict\s+vegan|vegan|strictly\s+vegetarian|strict\s+vegetarian|vegetarian|pescatarian|keto|carnivore|plant-based)",
+                "dietary_transition",
+                MemoryType.PROFILE_FACT
+            ),
+            (
+                r"(?:i(?:\'?m| am)\s+(?:severely\s+|deathly\s+)?allergic\s+to|i\s+have\s+(?:an?\s+)?(?:severe\s+)?allergy\s+to|allergic\s+to)\s+([A-Za-z0-9\s]+?)(?:\.|\!|\?|,|$)",
+                "allergic_to",
+                MemoryType.PROFILE_FACT
+            ),
+            (
+                r"(?:i(?:\'?m| am)\s+(?:now\s+|a\s+|on\s+a\s+|on\s+|now\s+on\s+a\s+)?|"
+                r"i\s+(?:follow|adhere\s+to|turned|switched\s+to|switched\s+to\s+a|became|went|eat|eat\s+a)(?:\s+a|\s+now)?\s+)"
+                r"(strict\s+vegan|strictly\s+vegan|vegan|strictly\s+vegetarian|strict\s+vegetarian|vegetarian|pescatarian|heavy\s+keto\s+carnivore|keto\s+carnivore|strict\s+keto|keto|carnivore|paleo|mediterranean|plant-based|gluten-free|dairy-free)"
+                r"(?:\s+diet)?(?:\s+now|\s+lately|\s+for\s+health|\.|\!|\?|,|\s+so|\s+and|$)",
+                "dietary_lifestyle",
+                MemoryType.PROFILE_FACT
+            ),
+            (
+                r"(?:i\s+(?:don\'t|do\s+not|avoid|cannot|can\'t|no\s+longer)\s+(?:eat|consume|having)|i\s+gave\s+up\s+eating)\s+([A-Za-z0-9\s]+?)(?:\.|\!|\?|,|$)",
+                "avoids_food",
+                MemoryType.PREFERENCE
+            ),
             
             # Beverages & Consumption Preferences
-            (r"(?:my favorite beverage is|my favorite drink is|i love drinking|my go-to drink is)\s+([A-Za-z\s]+?)(?:\.|$)", "primary_beverage", MemoryType.PREFERENCE),
-            (r"(?:i quit|i stopped drinking|i no longer drink|i gave up)\s+([A-Za-z\s]+?)(?:\s+completely|\.|$)", "stopped_consuming", MemoryType.PREFERENCE),
-            (r"(?:now i only drink|i only drink|i switch(?:ed)? to(?: only)?|i drink only)\s+([A-Za-z\s]+?)(?:\.|$)", "primary_beverage", MemoryType.PREFERENCE),
-            (r"(?:i prefer|i like|i love|i drink)\s+([A-Za-z\s]+?)(?:\s+over|\s+instead of|\.|$)", "prefers_beverage", MemoryType.PREFERENCE),
+            (
+                r"(?:my\s+(?:favorite|favourite|preferred|go-to|daily|usual)\s+(?:beverage|drink)\s+is|"
+                r"i(?:\s+really|\s+absolutely)?\s+love\s+drinking|"
+                r"i(?:\s+usually|\s+always|\s+mostly|\s+regularly)?\s+drink|"
+                r"i(?:\'?m| am)\s+drinking|"
+                r"now\s+i(?:\s+only)?\s+drink|"
+                r"i\s+only\s+drink|"
+                r"i(?:\s+have|\'ve)?\s+switched\s+to(?:\s+only)?|"
+                r"i\s+started\s+drinking)\s+([A-Za-z\s]+?)(?:\s+now|\s+these\s+days|\s+lately|\.|\!|\?|,|$)",
+                "primary_beverage",
+                MemoryType.PREFERENCE
+            ),
+            (
+                r"(?:i\s+(?:quit\s+drinking|quit|stopped\s+drinking|stopped|no\s+longer\s+drink|gave\s+up\s+drinking|gave\s+up))\s+([A-Za-z\s]+?)(?:\s+and\s+|\s+completely|\s+entirely|\.|\!|\?|,|$)",
+                "stopped_consuming",
+                MemoryType.PREFERENCE
+            ),
+            (
+                r"(?:i\s+prefer|i\s+like|i\s+love)\s+([A-Za-z\s]+?)\s+(?:over|instead\s+of|rather\s+than)\s+([A-Za-z\s]+?)(?:\.|\!|\?|,|$)",
+                "prefers_beverage",
+                MemoryType.PREFERENCE
+            ),
 
             # Technical & Architecture Decisions
-            (r"(?:we decided to use|our team is using|we chose|we are building with|we picked|we selected)\s+([A-Za-z0-9\.\-\s]+?)(?:\s+as our primary database|\s+as our database|\s+for|\s+as|\.|$)", "decided_to_use", MemoryType.DECISION),
-            (r"(?:we migrated from|we replaced)\s+([A-Za-z0-9\.\-\s]+?)\s+to\s+([A-Za-z0-9\.\-\s]+)", "migrated_tech", MemoryType.DECISION),
-            (r"(?:we migrated from|we replaced)\s+([A-Za-z0-9\.\-\s]+?)\s+with\s+([A-Za-z0-9\.\-\s]+)", "migrated_tech", MemoryType.DECISION),
-            (r"(?:we cancelled|we scrapped|we deprecated)\s+([A-Za-z0-9\.\-\s]+?)(?:\.|$)", "deprecated_tech", MemoryType.DECISION),
-            (r"(?:my favorite ide is|my preferred ide is|i code in|i prefer using)\s+([A-Za-z0-9\s]+?)(?:\.|$)", "prefers_tool", MemoryType.PREFERENCE),
+            (
+                r"(?:we\s+(?:decided\s+to\s+use|chose|picked|selected|are\s+using|use|built\s+with|are\s+building\s+with|settled\s+on)|"
+                r"our\s+(?:team\s+is\s+using|stack\s+is|primary\s+database\s+is|database\s+is|db\s+is|backend\s+is|frontend\s+is))\s+"
+                r"([A-Za-z0-9\.\-\s\+]+?)(?:\s+as\s+(?:our|the)\s+(?:primary\s+|main\s+)?(?:database|db|backend|framework|stack|language)|\s+for\s+(?:our|the)\s+[A-Za-z0-9\s]+|\.|\!|\?|$)",
+                "decided_to_use",
+                MemoryType.DECISION
+            ),
+            (
+                r"(?:we\s+migrated\s+from|we\s+switched\s+from|we\s+moved\s+from|we\s+replaced)\s+([A-Za-z0-9\.\-\s]+?)\s+(?:to|with)\s+([A-Za-z0-9\.\-\s]+)",
+                "migrated_tech",
+                MemoryType.DECISION
+            ),
+            (
+                r"(?:we\s+cancelled|we\s+scrapped|we\s+deprecated|we\s+dropped|we\s+stopped\s+using)\s+([A-Za-z0-9\.\-\s]+?)(?:\.|\!|\?|$)",
+                "deprecated_tech",
+                MemoryType.DECISION
+            ),
+            (
+                r"(?:my\s+(?:favorite|favourite|preferred)\s+(?:ide|editor|tool|language)\s+is|"
+                r"i\s+(?:code|develop|program)\s+in|"
+                r"i\s+prefer\s+using|"
+                r"i\s+use\s+(?:the\s+)?(?:ide|editor)\s+)\s*([A-Za-z0-9\.\-\s]+?)(?:\.|\!|\?|$)",
+                "prefers_tool",
+                MemoryType.PREFERENCE
+            ),
+            (
+                r"(?:i(?:\s+usually|\s+primarily|\s+always)?\s+(?:code\s+in|code\s+with|use))\s+([A-Za-z0-9\.\-\#\+]+)(?:\s+for\s+coding|\s+as\s+my\s+editor|\.|\!|\?|$)",
+                "prefers_tool",
+                MemoryType.PREFERENCE
+            ),
             
-            # Contact & Confidential Projects
-            (r"(?:my email is|reach me at)\s+([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", "has_email", MemoryType.PROFILE_FACT),
-            (r"(?:my phone number is|my number is|call me at|my emergency contact number is)\s+([0-9\-\+\s\(\)]+)", "has_phone", MemoryType.PROFILE_FACT),
-            (r"(?:my name is|call me)\s+([A-Za-z]+)(?:\.|$)", "has_name", MemoryType.PROFILE_FACT),
-            (r"(?:my secret project is named|my confidential project is codenamed|my confidential project codename is|my secret project is|my confidential project is)\s+([A-Za-z0-9\-_\s]+?)(?:\.|$)", "confidential_project", MemoryType.DECISION),
+            # Contact & Identity & Confidential Projects
+            (
+                r"(?:my\s+email\s+is|reach\s+me\s+at|contact\s+me\s+at|email\s+me\s+at)\s+([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)",
+                "has_email",
+                MemoryType.PROFILE_FACT
+            ),
+            (
+                r"(?:my\s+(?:phone\s+number|phone|cell\s+phone|cell|mobile|number|emergency\s+contact\s+number)\s+is|call\s+me\s+at)\s+([0-9\-\+\s\(\)]{7,})",
+                "has_phone",
+                MemoryType.PROFILE_FACT
+            ),
+            (
+                r"(?:my\s+name\s+is|call\s+me|i(?:\'?m| am)\s+called|the\s+name\s+is)\s+([A-Za-z]+)(?:\.|\!|\?|$)",
+                "has_name",
+                MemoryType.PROFILE_FACT
+            ),
+            (
+                r"(?:my\s+(?:secret|confidential)\s+project(?:\s+codename)?\s+(?:is\s+named|is\s+codenamed|is|codename\s+is))\s+([A-Za-z0-9\-_\s]+?)(?:\.|\!|\?|$)",
+                "confidential_project",
+                MemoryType.DECISION
+            ),
 
             # Time-bound Events / Schedules
-            (r"(?:i have a meeting with|scheduled a sync with|meeting with)\s+([A-Za-z\s]+?)\s+(?:on|at|this coming|next)\s+([A-Za-z0-9\s:]+)", "has_meeting", MemoryType.EVENT_EPISODE),
-            (r"(?:i will be traveling to|visiting|trip to)\s+([A-Za-z\s]+?)\s+(?:on|in|during)\s+([A-Za-z0-9\s]+)", "travel_scheduled", MemoryType.EVENT_EPISODE)
+            (
+                r"(?:i\s+have\s+a\s+meeting\s+with|scheduled\s+a\s+sync\s+with|meeting\s+with)\s+([A-Za-z\s]+?)\s+(?:on|at|this\s+coming|next)\s+([A-Za-z0-9\s:]+)",
+                "has_meeting",
+                MemoryType.EVENT_EPISODE
+            ),
+            (
+                r"(?:i\s+will\s+be\s+traveling\s+to|visiting|trip\s+to)\s+([A-Za-z\s]+?)\s+(?:on|in|during)\s+([A-Za-z0-9\s]+)",
+                "travel_scheduled",
+                MemoryType.EVENT_EPISODE
+            )
         ]
 
         # Forgetting / Purge requests
@@ -66,6 +176,28 @@ class MemoryExtractor:
                 return target if target else "all"
         return None
 
+    def clean_extracted_object(self, obj: str) -> str:
+        """Cleans and standardizes extracted object entities."""
+        obj = obj.strip(" \t\n\r\"'.,;:!?")
+        # Strip leading filler words
+        obj = re.sub(r'^(?:a|an|the|to|drinking|eating|consuming)\s+', '', obj, flags=re.IGNORECASE).strip()
+
+        # Strip temporal and contextual filler suffixes
+        temporal_suffixes = [
+            r"\s+(?:right\s+now|currently|lately|recently|now|today|these\s+days|for\s+now|at\s+the\s+moment)$",
+            r"\s+(?:last|this|next)\s+(?:week|month|year|weekend|summer|winter|spring|fall|monday|tuesday|wednesday|thursday|friday|saturday|sunday|decade)$",
+            r"\s+since\s+[A-Za-z0-9\s]+$",
+            r"\s+for\s+(?:health|work|school|college|fun|good|a\s+while|months|years|days)$",
+            r"\s+as\s+(?:our|my|the)\s+(?:primary\s+|main\s+)?(?:database|db|framework|tool|stack|ide|language)$",
+            r"\s+for\s+(?:our|my|the)\s+(?:backend|frontend|project|app|database|db|infrastructure|caching)$"
+        ]
+        for pattern in temporal_suffixes:
+            obj = re.sub(pattern, "", obj, flags=re.IGNORECASE).strip(" \t\n\r\"'.,;:!?")
+
+        # Strip trailing punctuation
+        obj = re.sub(r'[\.\,\;\:\!\?]+$', '', obj).strip()
+        return obj
+
     def extract_memories(
         self,
         text: str,
@@ -82,26 +214,41 @@ class MemoryExtractor:
             return []
 
         matched_any = False
+        seen_slots = set()
+
         for pattern, predicate, mem_type in self.fact_patterns:
             matches = re.finditer(pattern, text, re.IGNORECASE)
             for m in matches:
                 matched_any = True
                 groups = m.groups()
-                obj = groups[0].strip()
+                raw_obj = groups[0].strip()
                 qualifier = groups[1].strip() if len(groups) > 1 else None
                 
-                # Clean object string
-                obj = re.sub(r'[\.\,\;]$', '', obj).strip()
-                
-                # Check for special migration pattern where groups are [old, new]
+                # Check for special migration / transition patterns
                 if predicate == "migrated_tech" and len(groups) >= 2:
-                    old_tech = groups[0].strip()
-                    new_tech = groups[1].strip()
+                    old_tech = self.clean_extracted_object(groups[0])
+                    new_tech = self.clean_extracted_object(groups[1])
                     obj = new_tech
                     qualifier = f"migrated from {old_tech}"
-                    canonical_predicate = "database_choice" if any(db in text.lower() for db in ["postgres", "sqlite", "mongo", "mysql", "database"]) else "framework_choice"
+                    canonical_predicate = "database_choice" if any(db in text.lower() for db in ["postgres", "sqlite", "mongo", "mysql", "database", "db"]) else "framework_choice"
+                elif predicate == "dietary_transition" and len(groups) >= 2:
+                    old_diet = self.clean_extracted_object(groups[0])
+                    new_diet = self.clean_extracted_object(groups[1])
+                    obj = new_diet
+                    qualifier = f"gave up {old_diet}"
+                    canonical_predicate = "dietary_lifestyle"
                 else:
+                    obj = self.clean_extracted_object(raw_obj)
                     canonical_predicate = self._canonicalize_predicate(predicate, text, obj)
+                
+                if not obj:
+                    continue
+
+                # Deduplicate identical extracted slots from the same text
+                slot_key = (canonical_predicate, obj.lower())
+                if slot_key in seen_slots:
+                    continue
+                seen_slots.add(slot_key)
                 
                 # Natural memory content
                 content = f"User {canonical_predicate.replace('_', ' ')}: {obj}"
@@ -157,24 +304,39 @@ class MemoryExtractor:
     def _canonicalize_predicate(self, predicate: str, raw_text: str, obj_val: str = "") -> str:
         """Maps synonymous predicates to single canonical slots for reliable conflict resolution."""
         raw_lower = raw_text.lower()
-        if "moved to" in raw_lower or "live in" in raw_lower or "living in" in raw_lower or "reside" in raw_lower:
+        obj_lower = obj_val.lower()
+
+        # Location / Residence
+        if any(k in raw_lower for k in ["moved to", "live in", "living in", "reside", "stay in", "based in", "located in", "relocated to"]):
             return "lives_in"
-        if "coffee" in raw_lower or "tea" in raw_lower or "matcha" in raw_lower or "beverage" in raw_lower or "drink" in raw_lower:
+        # Beverages
+        if any(k in raw_lower or k in obj_lower for k in ["coffee", "tea", "matcha", "beverage", "drink", "cold brew", "latte", "espresso", "soda"]):
+            if predicate in ["stopped_consuming", "avoids_food"]:
+                return predicate
             return "primary_beverage"
-        if "diet" in raw_lower or "vegan" in raw_lower or "vegetarian" in raw_lower or "keto" in raw_lower or "carnivore" in raw_lower:
+        # Diet
+        if any(k in raw_lower or k in obj_lower for k in ["diet", "vegan", "vegetarian", "keto", "carnivore", "paleo", "plant-based", "gluten-free", "dairy-free"]):
+            if predicate in ["stopped_consuming", "avoids_food"]:
+                return "avoids_food"
             return "dietary_lifestyle"
-        if "database" in raw_lower or "postgres" in raw_lower or "sqlite" in raw_lower or "mongo" in raw_lower or "mysql" in raw_lower:
+        # Database
+        if any(k in raw_lower or k in obj_lower for k in ["database", "postgres", "sqlite", "mongo", "mysql", "redis", "dynamodb", "supabase", "cassandra"]):
             return "database_choice"
-        if "framework" in raw_lower or "react" in raw_lower or "vue" in raw_lower or "angular" in raw_lower or "next" in raw_lower:
+        # Framework
+        if any(k in raw_lower or k in obj_lower for k in ["framework", "react", "vue", "angular", "next", "svelte", "django", "fastapi", "express", "graphql"]):
             return "framework_choice"
-        if "work as" in raw_lower or "job is" in raw_lower or "role is" in raw_lower:
+        # Work / Roles
+        if any(k in raw_lower for k in ["work as", "job is", "role is", "profession is", "title is", "engineer", "developer"]):
             return "works_as"
-        if "work at" in raw_lower or "employed at" in raw_lower or "company is" in raw_lower:
+        if any(k in raw_lower for k in ["work at", "employed by", "company is", "joined"]):
             return "employed_at"
-        if "phone" in raw_lower or "number is" in raw_lower:
+        # Contact
+        if predicate == "has_phone" or any(k in raw_lower for k in ["phone", "emergency contact number"]):
             return "has_phone"
-        if "secret project" in raw_lower or "confidential project" in raw_lower:
+        # Secret Projects
+        if any(k in raw_lower for k in ["secret project", "confidential project"]):
             return "confidential_project"
+
         return predicate
 
     def _is_transient(self, text: str) -> bool:
@@ -189,14 +351,20 @@ class MemoryExtractor:
         
         # Query detection
         is_query_start = (
-            t.startswith("what ") or t.startswith("where ") or t.startswith("who ") or
+            t.startswith("what ") or t.startswith("what's ") or t.startswith("whats ") or
+            t.startswith("where ") or t.startswith("where's ") or t.startswith("wheres ") or
+            t.startswith("who ") or t.startswith("who's ") or
             t.startswith("how ") or t.startswith("when ") or t.startswith("why ") or
             t.startswith("can you ") or t.startswith("do you remember") or
-            t.startswith("tell me") or t.startswith("which ") or t.startswith("do i ")
+            t.startswith("tell me") or t.startswith("which ") or t.startswith("do i ") or
+            t.startswith("am i ") or t.startswith("should i ") or t.startswith("is my ") or
+            t.startswith("are we ") or t.startswith("did we ")
         )
         is_fact_override = (
             "i moved" in t or "i changed" in t or "i am now" in t or
-            "we migrated" in t or "i quit" in t or "i switched" in t
+            "we migrated" in t or "i quit" in t or "i switched" in t or
+            "i gave up" in t or "i live in" in t or "i reside in" in t or
+            "i stay in" in t or "i am in" in t or "i'm in" in t
         )
         if is_query_start and not is_fact_override:
             return True
